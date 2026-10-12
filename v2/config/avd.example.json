@@ -1,0 +1,46 @@
+{
+  "schemaVersion": "1.0.0",
+  "tenantId": "11111111-1111-4111-8111-111111111111",
+  "subscriptionId": "22222222-2222-4222-8222-222222222222",
+  "target": {
+    "resourceGroupName": "avd-example",
+    "location": "uksouth",
+    "prefix": "AVD"
+  },
+  "profile": "AzureFilesHybridKerberos",
+  "execution": {
+    "deploymentIdentityClientId": "77777777-7777-4777-8777-777777777777",
+    "deploymentIdentityResourceId": "/subscriptions/22222222-2222-4222-8222-222222222222/resourceGroups/avd-control/providers/Microsoft.ManagedIdentity/userAssignedIdentities/avd-deployer"
+  },
+  "network": {
+    "resourceGroupName": "network-example",
+    "virtualNetworkName": "vnet-example",
+    "privateEndpointSubnetName": "private-endpoints",
+    "sessionHostSubnetName": "session-hosts",
+    "deployPrivateDns": true,
+    "dnsServers": []
+  },
+  "identity": {
+    "kerberosDomainName": "corp.example.invalid",
+    "kerberosDomainGuid": "33333333-3333-4333-8333-333333333333",
+    "avdServicePrincipalObjectId": "66666666-6666-4666-8666-666666666666"
+  },
+  "storage": {
+    "accountName": "avdexample123456"
+  },
+  "accessGroups": {
+    "usersObjectId": "44444444-4444-4444-8444-444444444444",
+    "adminsObjectId": "55555555-5555-4555-8555-555555555555"
+  },
+  "sessionHosts": {
+    "namePrefix": "AVDHOST",
+    "count": 2,
+    "vmSize": "Standard_D2as_v5",
+    "adminUsername": "AVD-Admin",
+    "adminPasswordSecretUri": "https://avd-example.vault.azure.net/secrets/session-host-admin-password"
+  },
+  "artifacts": {
+    "sessionHostPrepUri": "https://artifacts.example.invalid/avd/session-host-prep.ps1",
+    "sessionHostPrepSha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  }
+}

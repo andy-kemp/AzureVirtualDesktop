@@ -1,0 +1,221 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://schemas.example.invalid/avd/config/v1.0.0",
+  "title": "AVD deployment configuration",
+  "description": "Non-secret customer-scoped input for the V2 AVD CLI. Secret values are never configuration properties.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "tenantId",
+    "subscriptionId",
+    "target",
+    "profile",
+    "execution",
+    "network",
+    "identity",
+    "storage",
+    "accessGroups",
+    "sessionHosts",
+    "artifacts"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0.0"
+    },
+    "tenantId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "subscriptionId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resourceGroupName", "location", "prefix"],
+      "properties": {
+        "resourceGroupName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 90,
+          "pattern": "^[A-Za-z0-9._()\\-]+$"
+        },
+        "location": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-z0-9]+$"
+        },
+        "prefix": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 10,
+          "pattern": "^[A-Za-z][A-Za-z0-9-]*$"
+        }
+      }
+    },
+    "profile": {
+      "type": "string",
+      "enum": ["AzureFilesHybridKerberos"]
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["deploymentIdentityClientId", "deploymentIdentityResourceId"],
+      "properties": {
+        "deploymentIdentityClientId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "deploymentIdentityResourceId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "pattern": "^/subscriptions/[0-9A-Fa-f-]{36}/resourceGroups/[^/]+/providers/Microsoft\\.ManagedIdentity/userAssignedIdentities/[^/]+$"
+        }
+      }
+    },
+    "network": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resourceGroupName", "virtualNetworkName", "privateEndpointSubnetName", "sessionHostSubnetName", "deployPrivateDns"],
+      "properties": {
+        "resourceGroupName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 90
+        },
+        "virtualNetworkName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 64
+        },
+        "privateEndpointSubnetName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "sessionHostSubnetName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "deployPrivateDns": {
+          "type": "boolean"
+        },
+        "dnsServers": {
+          "type": "array",
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "format": "ipv4"
+          },
+          "default": []
+        }
+      }
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kerberosDomainName", "kerberosDomainGuid", "avdServicePrincipalObjectId"],
+      "properties": {
+        "kerberosDomainName": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 253,
+          "pattern": "^(?=.{1,253}$)([A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+[A-Za-z]{2,63}$"
+        },
+        "kerberosDomainGuid": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "avdServicePrincipalObjectId": {
+          "type": "string",
+          "format": "uuid"
+        }
+      }
+    },
+    "storage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["accountName"],
+      "properties": {
+        "accountName": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 24,
+          "pattern": "^[a-z0-9]+$"
+        }
+      }
+    },
+    "accessGroups": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["usersObjectId", "adminsObjectId"],
+      "properties": {
+        "usersObjectId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "adminsObjectId": {
+          "type": "string",
+          "format": "uuid"
+        }
+      }
+    },
+    "sessionHosts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["namePrefix", "count", "vmSize", "adminUsername", "adminPasswordSecretUri"],
+      "properties": {
+        "namePrefix": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 11,
+          "pattern": "^[A-Za-z][A-Za-z0-9-]*$"
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "vmSize": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9_]+$"
+        },
+        "adminUsername": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 20,
+          "pattern": "^[A-Za-z][A-Za-z0-9._-]*$"
+        },
+        "adminPasswordSecretUri": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://[^/]+\\.vault\\.azure\\.net/secrets/[^/?#]+(?:/[^?#]+)?$"
+        }
+      }
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionHostPrepUri", "sessionHostPrepSha256"],
+      "properties": {
+        "sessionHostPrepUri": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://"
+        },
+        "sessionHostPrepSha256": {
+          "type": "string",
+          "pattern": "^[A-Fa-f0-9]{64}$"
+        }
+      }
+    }
+  }
+}
