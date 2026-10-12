@@ -23,7 +23,15 @@
 @description('Prefix for all session hosts')
 param sessionHostPrefix string = 'AVD'
 
+@description('Existing host pool to register with; independent of VM names')
+param hostPoolName string = '${sessionHostPrefix}-HostPool'
+
+@description('Session host VM size')
+param vmSize string = 'Standard_D2as_v5'
+
 @description('Number of session hosts to deploy')
+@minValue(1)
+@maxValue(100)
 param numberOfHosts int = 2
 
 @secure()
@@ -33,8 +41,9 @@ param adminPassword string
 @description('Admin username for session hosts')
 param adminUsername string = 'AVD-Admin'
 
+@secure()
 @description('Registration key for the AVD host pool')
-param hostPoolRegistrationInfoToken string = 'Enter HostPool Registration Key here'
+param hostPoolRegistrationInfoToken string
 
 // These values are for the existing vNet/subnet
 @description('Resource group containing the vNet')
@@ -69,7 +78,7 @@ var dnsServers = concat(empty(dns1) ? [] : [dns1], empty(dns2) ? [] : [dns2])
 
 // Reference the HostPool
 resource HostPool 'Microsoft.DesktopVirtualization/hostpools@2021-07-12' existing = {
-  name: '${sessionHostPrefix}-HostPool'
+  name: hostPoolName
 }
 
 // Reference the existing subnet
@@ -102,7 +111,7 @@ resource nic 'Microsoft.Network/networkInterfaces@2020-11-01' = [for i in range(
 }]
 
 // Create the VMs (removing dataDisks so only the OS disk is created)
-resource VM 'Microsoft.Compute/virtualMachines@2020-12-01' = [for i in range(0, numberOfHosts): {
+resource VM 'Microsoft.Compute/virtualMachines@2024-03-01' = [for i in range(0, numberOfHosts): {
   name: '${sessionHostPrefix}-${i}'
   location: resourceGroup().location
   identity: {
@@ -110,7 +119,14 @@ resource VM 'Microsoft.Compute/virtualMachines@2020-12-01' = [for i in range(0, 
   }
   properties: {
     hardwareProfile: {
-      vmSize: 'Standard_d2as_v5'
+      vmSize: vmSize
+    }
+    securityProfile: {
+      securityType: 'TrustedLaunch'
+      uefiSettings: {
+        secureBootEnabled: true
+        vTpmEnabled: true
+      }
     }
     osProfile: {
       computerName: '${sessionHostPrefix}-${i}'
@@ -233,3 +249,5 @@ MANUAL STEPS REQUIRED:
 6. Please update internal DNS to point ${storageAccountName}.file.${environment().suffixes.storage} to the IP address it has been assigned to.
    (Note: If you are using a Private Endpoint, you can retrieve the assigned IP from the Private Endpoint NIC in the Azure portal.)
 '''
+
+output sessionHostNames array = [for hostIndex in range(0, numberOfHosts): '${sessionHostPrefix}-${hostIndex}']
