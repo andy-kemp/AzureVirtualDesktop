@@ -1,6 +1,6 @@
 # V2: Self-hosted desktop deployment portal
 
-Status: agreed design; Phase 1 local contract/CLI/build slice in progress. No portal or Azure deployment is implemented or approved. Updated: 2026-10-11.
+Status: agreed design; Phase 1 CLI with Azure Preview/Deploy ready for a first sandbox run ([runbook](docs/sandbox-test.md)). No portal is implemented. Updated: 2026-10-14.
 
 Customers install this portal into **their own Azure subscription and Entra tenant**, from this repository using Bicep and one bootstrap script. The author's instance is simply the first installation. There is no central service, cross-tenant access or vendor standing access. Future SaaS must receive a separate design; MVP contracts only keep the target tenant explicit.
 
@@ -11,20 +11,101 @@ Customers install this portal into **their own Azure subscription and Entra tena
 - [Customer bootstrap/uninstall](docs/bootstrap.md): customer-admin actions, privilege hand-offs and ownership-aware cleanup.
 - [Delivery phases](docs/phases.md): Phase 1 contract/orchestration/CLI, exit criteria and pre-code questions.
 - [Deployment experience](docs/deployment-experience.md): guided pilot defaults and the few choices operators should make.
+- [Sandbox test runbook](docs/sandbox-test.md): prerequisites and step-by-step Preview/Deploy for a first real run.
 - [Earlier project brief](PROJECT-BRIEF.md): superseded historical draft, not current requirements.
 - [Phase 1 CLI](avd.ps1), [JSON Schema](contracts/avd-config.schema.json), [example config](config/avd.example.json), and isolated [AVD Bicep](infra/avd/platform.bicep) / [session-host Bicep](infra/avd/session-hosts.bicep).
+- [ADR 0009](docs/adr/0009-native-avd-autoscale.md): optional host-pool scaling using the native AVD scaling plan.
+- [ADR 0010](docs/adr/0010-persona-based-sizing.md): shared/dedicated, persona and user-count questions that size the host pool, using the [sizing profiles](contracts/sizing-profiles.json) and [sizing module](lib/AvdSizing.psm1).
+- [ADR 0011](docs/adr/0011-user-profiles.md): FSLogix on Azure Files for shared pools (hybrid, or cloud-only preview) and local profiles for dedicated hosts, with the V2 [session host prep script](scripts/session-host-prep.ps1).
+- [ADR 0012](docs/adr/0012-expansion-and-dedicated-users.md): expanding V2 deployments and assigning dedicated hosts to named users ([expansion module](lib/AvdExpansion.psm1)).
 
 ## Phase 1 local CLI
 
-The current offline slice supports contract validation and Bicep compilation only:
+The CLI covers a sizing questionnaire, expansion of saved V2 configurations, contract validation, Bicep compilation, and Azure **Preview** and **Deploy**. Follow the [sandbox test runbook](docs/sandbox-test.md) for a first real run.
 
 ```powershell
+pwsh -NoProfile -File ./v2/avd.ps1 -Mode New -OutputFile ./my-avd.json
+pwsh -NoProfile -File ./v2/avd.ps1 -Mode Expand -ConfigurationFile ./my-avd.json -AddHosts 2
+pwsh -NoProfile -File ./v2/avd.ps1 -Mode AddUser -ConfigurationFile ./my-avd.json -UserPrincipalName jane@contoso.com
 pwsh -NoProfile -File ./v2/avd.ps1 -Mode Validate -ConfigurationFile ./v2/config/avd.example.json
 pwsh -NoProfile -File ./v2/avd.ps1 -Mode Build -ConfigurationFile ./v2/config/avd.example.json
+pwsh -NoProfile -File ./v2/avd.ps1 -Mode Preview -ConfigurationFile ./my-avd.json
+pwsh -NoProfile -File ./v2/avd.ps1 -Mode Deploy -ConfigurationFile ./my-avd.json -AsSignedInUser
 pwsh -NoProfile -File ./v2/tests/Phase1.Tests.ps1
+pwsh -NoProfile -File ./v2/tests/Deployment.Tests.ps1
 ```
 
-The sample uses reserved/example values and is not deployable. The schema is the machine contract, not the intended questionnaire: the [guided pilot experience](docs/deployment-experience.md) derives ordinary values and keeps secret URIs/artifact digests out of the user flow. The target resource group and VNet/subnets must already exist for the current build-only slice. `Build` compiles the two V2 AVD entry points without Azure login or resource changes. Azure `Preview` and `Deploy` are deliberately not exposed yet: delegated preview, approved-plan binding, UAMI execution, artifact digest verification and failure/token-cleanup orchestration still need implementation and sandbox approval. Do not use the root runner as a substitute.
+The sample uses reserved/example values and is not deployable. The schema is the machine contract, not the intended questionnaire: the [guided pilot experience](docs/deployment-experience.md) derives ordinary values and keeps secret URIs/artifact digests out of the user flow. The target resource group and VNet/subnets must already exist for the current build-only slice. `Build` compiles the two V2 AVD entry points without Azure login or resource changes.
+
+### Sizing questionnaire
+
+`-Mode New` asks:
+
+1. Is this a shared platform or dedicated session hosts?
+2. Which persona: Frontline (web/LOB apps), Standard (Microsoft 365 and Teams) or Heavy?
+3. How many users, and for shared pools, what peak concurrency?
+4. For shared pools, are users hybrid (synced from AD) or cloud-only (preview)? This chooses the FSLogix profile.
+5. Business-hours scaling or always available?
+
+It applies the answers to a base configuration (`-ConfigurationFile`, by default the example) and writes `-OutputFile` as contract `1.3.0`, with `profile`, `workload`, `hostPool`, `sessionHosts` and `scaling` filled in. Each answer can be passed as a parameter (`-Hosting`, `-Persona`, `-Users`, `-PeakConcurrencyPct`, `-UserIdentity`, `-ScalingPreset`, `-TimeZone`, `-WorkdayStart`, `-WorkdayEnd`) for unattended use; existing files need `-Force`.
+
+- **Shared:** a pooled multi-session pool sized at Microsoft's users-per-vCPU guidance on D8s_v5 hosts, plus one spare. FSLogix profiles on Azure Files with Microsoft Entra Kerberos.
+- **Dedicated:** a personal pool with one persona-sized single-session VM per user, Direct assignment, and the profile kept on the VM like Windows 365. No storage account is deployed.
+
+`Validate` reports whether the configured hosts match the recommendation or are an override. Figures are starting estimates; see [ADR 0010](docs/adr/0010-persona-based-sizing.md).
+
+### Expanding a V2 deployment
+
+These modes update the saved configuration of an estate deployed by V2, in place or to `-OutputFile`. Nothing is written to Azure or Entra until the approved deploy.
+
+- **`-Mode Expand`** (shared pools): `-AddHosts N`, or `-Users N` to re-size from the recorded persona. New hosts continue the stable names. VM size and sessions per host never change, and the host count never goes down.
+- **`-Mode AddUser`** (dedicated pools): `-UserPrincipalName` gives the user the next free host, or adds one.
+  - The UPN is resolved to an object ID with a read-only, delegated Graph lookup. Run `Connect-MgGraph -TenantId <tenant> -Scopes User.ReadBasic.All` first; sessions for other tenants are rejected. Alternatively pass `-UserObjectId`.
+  - At deploy, the host's assigned user is set and the user is added to the AVD users group with the operator's own delegated permission.
+
+See [ADR 0012](docs/adr/0012-expansion-and-dedicated-users.md).
+
+### Profiles (FSLogix)
+
+| Profile | Use | Status |
+| --- | --- | --- |
+| `AzureFilesHybridKerberos` | Shared pools, hybrid identities | Generally available |
+| `AzureFilesEntraKerberosCloudOnly` | Shared pools, cloud-only Entra identities; needs `storage.acknowledgePreview: true` and admin prerequisites | Microsoft preview |
+| `LocalProfile` | Dedicated pools; no FSLogix or storage | Not applicable |
+
+See [ADR 0011](docs/adr/0011-user-profiles.md).
+
+### Scaling
+
+Contract `1.1.0` adds an optional `scaling` section. When present, the platform Bicep deploys a native AVD scaling plan (`<prefix>-ScalingPlan`) with one or more non-overlapping weekly schedules, each with ramp-up, peak, ramp-down and off-peak phases.
+
+- **Pooled pools:** schedules set minimum host percentages, capacity thresholds, load balancing and user notification. The business-hours preset keeps at least one host on and, during working hours, keeps one empty host ready until every host is running. Users are spread breadth-first, and hosts with active or disconnected sessions are never shut down ([ADR 0009](docs/adr/0009-native-avd-autoscale.md#business-hours-preset-behaviour)).
+- **Personal pools:** schedules set Start VM on Connect and deallocate-after-disconnect or after-logoff timers. Hibernate is excluded because of FSLogix.
+
+The AVD service starts and deallocates existing hosts within `sessionHosts.count`. Nothing is created or deleted. `Validate` checks the time zone ID, phase ordering and day overlap. Omit `scaling` to keep the earlier behaviour; `1.0.0` files remain valid.
+
+Before scaling can work, a customer Azure access administrator must assign **Desktop Virtualization Power On Off Contributor** to the Azure Virtual Desktop service principal **at subscription scope**. The workload Bicep deliberately does not grant this. See [ADR 0009](docs/adr/0009-native-avd-autoscale.md).
+
+### Preview and Deploy
+
+Both run in the [orchestration module](lib/AvdDeployment.psm1).
+
+**`-Mode Preview`** is read-only:
+
+- Signs in to the configured tenant and subscription if needed.
+- Checks the target resource group, VNet and subnets, the prep script SHA-256 and the autoscale power role.
+- Runs Azure what-if. The session-host stage is previewed only once the host pool exists.
+- Writes a plan (`<config>.plan.json`) bound to the configuration and template hashes, valid for 24 hours, with any blockers and warnings.
+
+**`-Mode Deploy`** applies a fresh, blocker-free, unchanged plan:
+
+- Approval is by typing the resource group name, or `-Approve <rg>`.
+- It runs as the deployment managed identity, or as you with `-AsSignedInUser` for sandbox and local runs.
+- It reads the admin password from Key Vault, deploys the platform, creates a 4-hour registration token, deploys hosts, **always revokes the token**, and verifies registration.
+- For dedicated pools it assigns hosts to named users and adds them to the AVD users group with your delegated Graph permission. Denial becomes a manual task, never a fallback.
+- It ends with the remaining manual tasks.
+
+Offline mocked tests cover ordering, failure handling and secret hygiene. The first real run should follow the [sandbox runbook](docs/sandbox-test.md). Do not use the root runner as a substitute.
 
 ## Locked decisions
 
@@ -38,6 +119,10 @@ The sample uses reserved/example values and is not deployable. The schema is the
 | Products | AVD first; Windows 365 Enterprise next, Entra join/Microsoft-hosted network; verify licences only | [ADR 0006](docs/adr/0006-provider-scope.md) |
 | Cloudflare | Out of scope for the MVP | [ADR 0007](docs/adr/0007-no-cloudflare.md) |
 | Compatibility | All new work under `v2/`; root scripts/templates/tests stay untouched | [ADR 0008](docs/adr/0008-isolate-v2.md) |
+| Scaling | Optional native AVD scaling plan (power management only); subscription-scope power role is a customer prerequisite | [ADR 0009](docs/adr/0009-native-avd-autoscale.md) |
+| Sizing | Shared (pooled) or dedicated (personal) pools sized from persona and user count using Microsoft guidance; operator may override | [ADR 0010](docs/adr/0010-persona-based-sizing.md) |
+| Profiles | FSLogix on Azure Files for shared pools (hybrid GA, cloud-only preview); local profiles on dedicated hosts | [ADR 0011](docs/adr/0011-user-profiles.md) |
+| Expansion | Expand V2 estates from the saved config; dedicated hosts for named users; group membership via operator's delegated rights only | [ADR 0012](docs/adr/0012-expansion-and-dedicated-users.md) |
 
 ## Architecture
 
@@ -73,9 +158,9 @@ SWA linked APIs have a 45-second request limit, do not support network-isolated 
 5. Submit durable work; worker validates the approval and executes allowlisted provider stages with scoped UAMI authority. Closing the browser does not lose accepted work.
 6. Report stages, operation/resource IDs and manual readiness checks. A provider-accepted operation is not proof of user/device readiness.
 
-AVD preserves the [current runner](../Deploy-AvdSolution.ps1), [Bicep behaviour](../main.bicep) and [documented boundaries](../README.md): platform then hosts, incremental reruns, stable zero-based host names, four-hour registration token/revocation and registration checks. Fresh Azure host preflight requires the pool/RG to exist. Reducing a count does not drain/delete; failures do not delete successfully deployed infrastructure.
+AVD preserves the [current runner](../Deploy-AvdSolution.ps1), [Bicep behaviour](../main.bicep) and [documented boundaries](../README.md): platform then hosts, incremental reruns, stable zero-based host names, four-hour registration token/revocation and registration checks. Fresh Azure host preflight requires the pool/RG to exist. Reducing a count does not drain/delete; failures do not delete successfully deployed infrastructure. Day-to-day capacity is handled by the optional AVD scaling plan, which powers existing hosts on and off but never removes them.
 
-Existing networks/groups, Azure Files hybrid Kerberos consent, Windows ACLs, DNS forwarding, Intune prerequisites and real sign-in/profile-persistence verification remain explicit administrator tasks. Pin V2 scripts/tooling/image versions; do not import broad legacy Conditional Access changes or arbitrary preparation URLs.
+Existing networks/groups, Azure Files Microsoft Entra Kerberos consent (hybrid, or cloud-only preview prerequisites per [ADR 0011](docs/adr/0011-user-profiles.md)), Windows ACLs, DNS forwarding, Intune prerequisites and real sign-in/profile-persistence verification remain explicit administrator tasks. Pin V2 scripts/tooling/image versions; do not import broad legacy Conditional Access changes or arbitrary preparation URLs.
 
 Windows 365 Enterprise uses Graph policies/group assignments, not Bicep session-host VMs. Entra join/Microsoft-hosted networking and gallery images only. Verify tenant/user licences; never assign/buy them. Groups and licences can drift after approval, so require fresh evidence and pause stale jobs. Full provisioning-status observation is a verified-capability gate, not an assumed v1.0 property.
 
@@ -97,4 +182,4 @@ The [matrix](docs/permission-matrix.md) records current Learn sources and explic
 - Approval/self-approval rules, freshness/expiry and concurrency/host limits for the first installation.
 - Before portal install: implementation versions, region/SKUs/budget, retention/residency, OBO certificate lifecycle and API exposure constraints.
 
-Proceed only when the relevant [phase gate](docs/phases.md) is approved. The current CLI does not authenticate to Azure or deploy resources; no bootstrap, app registration, Graph consent or tenant change is included.
+Proceed only when the relevant [phase gate](docs/phases.md) is approved. The CLI's Preview signs in to Azure read-only. Deploy creates resources and, for dedicated users, changes group membership, and should first be run in a sandbox. No bootstrap, app registration or Graph consent automation is included.

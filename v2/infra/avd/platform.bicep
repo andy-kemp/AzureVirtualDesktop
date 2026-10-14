@@ -1,13 +1,18 @@
 targetScope = 'resourceGroup'
 
+import { hostPoolConfiguration, scalingConfiguration } from './types.bicep'
+
 @description('Prefix for AVD resources and host pool.')
 param defaultPrefix string
-@description('Globally unique Azure Storage account name.')
-param storageAccountName string
-@description('Hybrid Kerberos domain name.')
-param kerberosDomainName string
-@description('Hybrid Kerberos domain GUID.')
-param kerberosDomainGuid string
+@description('User profile option: FSLogix on Azure Files for hybrid or cloud-only (preview) identities, or local profiles on dedicated VMs.')
+@allowed(['AzureFilesHybridKerberos', 'AzureFilesEntraKerberosCloudOnly', 'LocalProfile'])
+param profile string = 'AzureFilesHybridKerberos'
+@description('Globally unique Azure Storage account name; empty for LocalProfile.')
+param storageAccountName string = ''
+@description('Hybrid Kerberos domain name; AzureFilesHybridKerberos only.')
+param kerberosDomainName string = ''
+@description('Hybrid Kerberos domain GUID; AzureFilesHybridKerberos only.')
+param kerberosDomainGuid string = ''
 @description('Existing Entra group object ID for AVD users.')
 param avdUsersGroupOid string
 @description('Existing Entra group object ID for AVD administrators.')
@@ -22,10 +27,15 @@ param vnetName string
 param privateEndpointSubnetName string
 @description('Create/link private DNS in this resource group; false for centrally managed DNS.')
 param deployPrivateDns bool = true
+@description('Optional host pool behaviour from persona sizing. Omit for the legacy pooled default (5 sessions, breadth-first).')
+param hostPool hostPoolConfiguration?
+@description('Optional AVD autoscale plan for the host pool. Omit to deploy no scaling plan.')
+param scaling scalingConfiguration?
 
 module platform './modules/platform.bicep' = {
   params: {
     defaultPrefix: defaultPrefix
+    profile: profile
     storageAccountName: storageAccountName
     kerberosDomainName: kerberosDomainName
     kerberosDomainGuid: kerberosDomainGuid
@@ -36,11 +46,15 @@ module platform './modules/platform.bicep' = {
     vnetName: vnetName
     privateEndpointSubnetName: privateEndpointSubnetName
     deployPrivateDns: deployPrivateDns
+    hostPool: hostPool
+    scaling: scaling
   }
 }
 
 output resourceGroupName string = resourceGroup().name
 output hostPoolName string = '${defaultPrefix}-HostPool'
+output hostPoolType string = hostPool.?type ?? 'Pooled'
 output appGroupId string = platform.outputs.appGroupId
 output workspaceId string = platform.outputs.workspaceId
-output profilesPath string = '\\\\${storageAccountName}.file.${environment().suffixes.storage}\\profiles'
+output scalingPlanId string = platform.outputs.scalingPlanId
+output profilesPath string = profile == 'LocalProfile' ? '' : '\\\\${storageAccountName}.file.${environment().suffixes.storage}\\profiles'

@@ -1,10 +1,74 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://schemas.example.invalid/avd/config/v1.0.0",
+  "$id": "https://schemas.example.invalid/avd/config/v1.3.0",
   "title": "AVD deployment configuration",
-  "description": "Non-secret customer-scoped input for the V2 AVD CLI. Secret values are never configuration properties.",
+  "description": "Non-secret customer-scoped input for the V2 AVD CLI. Secret values are never configuration properties. 1.1.0 adds optional host-pool scaling; 1.2.0 adds persona-based workload sizing and shared (pooled) or dedicated (personal) host pools; 1.3.0 adds cloud-only FSLogix (preview), local profiles for dedicated hosts and named user assignments. Earlier versions remain valid.",
   "type": "object",
   "additionalProperties": false,
+  "allOf": [
+    {
+      "if": { "required": ["scaling"] },
+      "then": { "properties": { "schemaVersion": { "enum": ["1.1.0", "1.2.0", "1.3.0"] } } }
+    },
+    {
+      "if": { "anyOf": [{ "required": ["workload"] }, { "required": ["hostPool"] }] },
+      "then": { "properties": { "schemaVersion": { "enum": ["1.2.0", "1.3.0"] } } }
+    },
+    {
+      "if": {
+        "anyOf": [
+          { "required": ["assignments"] },
+          { "properties": { "profile": { "enum": ["AzureFilesEntraKerberosCloudOnly", "LocalProfile"] } } }
+        ]
+      },
+      "then": { "properties": { "schemaVersion": { "const": "1.3.0" } } }
+    },
+    {
+      "if": { "required": ["workload"] },
+      "then": { "required": ["hostPool"] }
+    },
+    {
+      "if": { "properties": { "profile": { "enum": ["AzureFilesHybridKerberos", "AzureFilesEntraKerberosCloudOnly"] } } },
+      "then": { "required": ["storage"] },
+      "else": { "not": { "required": ["storage"] } }
+    },
+    {
+      "if": { "properties": { "profile": { "const": "AzureFilesHybridKerberos" } } },
+      "then": { "properties": { "identity": { "required": ["kerberosDomainName", "kerberosDomainGuid"] } } },
+      "else": {
+        "properties": {
+          "identity": { "not": { "anyOf": [{ "required": ["kerberosDomainName"] }, { "required": ["kerberosDomainGuid"] }] } }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "profile": { "const": "AzureFilesEntraKerberosCloudOnly" } } },
+      "then": { "properties": { "storage": { "required": ["acknowledgePreview"], "properties": { "acknowledgePreview": { "const": true } } } } }
+    },
+    {
+      "if": { "required": ["assignments"] },
+      "then": { "properties": { "hostPool": { "required": ["assignmentType"], "properties": { "assignmentType": { "const": "Direct" } } } } }
+    },
+    {
+      "if": {
+        "required": ["hostPool"],
+        "properties": { "hostPool": { "required": ["type"], "properties": { "type": { "const": "Personal" } } } }
+      },
+      "then": {
+        "properties": {
+          "profile": { "const": "LocalProfile" },
+          "scaling": { "properties": { "schedules": { "items": { "$ref": "#/definitions/personalSchedule" } } } }
+        }
+      },
+      "else": {
+        "not": { "required": ["assignments"] },
+        "properties": {
+          "profile": { "enum": ["AzureFilesHybridKerberos", "AzureFilesEntraKerberosCloudOnly"] },
+          "scaling": { "properties": { "schedules": { "items": { "$ref": "#/definitions/pooledSchedule" } } } }
+        }
+      }
+    }
+  ],
   "required": [
     "schemaVersion",
     "tenantId",
@@ -14,14 +78,14 @@
     "execution",
     "network",
     "identity",
-    "storage",
     "accessGroups",
     "sessionHosts",
     "artifacts"
   ],
   "properties": {
     "schemaVersion": {
-      "const": "1.0.0"
+      "type": "string",
+      "enum": ["1.0.0", "1.1.0", "1.2.0", "1.3.0"]
     },
     "tenantId": {
       "type": "string",
@@ -57,8 +121,9 @@
       }
     },
     "profile": {
+      "description": "User profile and identity profile. AzureFilesHybridKerberos: FSLogix on Azure Files for hybrid identities (GA). AzureFilesEntraKerberosCloudOnly: FSLogix on Azure Files for cloud-only Entra identities (Microsoft preview). LocalProfile: profiles stay on each dedicated VM, no FSLogix or storage (personal pools only).",
       "type": "string",
-      "enum": ["AzureFilesHybridKerberos"]
+      "enum": ["AzureFilesHybridKerberos", "AzureFilesEntraKerberosCloudOnly", "LocalProfile"]
     },
     "execution": {
       "type": "object",
@@ -120,7 +185,7 @@
     "identity": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kerberosDomainName", "kerberosDomainGuid", "avdServicePrincipalObjectId"],
+      "required": ["avdServicePrincipalObjectId"],
       "properties": {
         "kerberosDomainName": {
           "type": "string",
@@ -148,6 +213,37 @@
           "minLength": 3,
           "maxLength": 24,
           "pattern": "^[a-z0-9]+$"
+        },
+        "acknowledgePreview": {
+          "description": "Required as true for AzureFilesEntraKerberosCloudOnly, which Microsoft documents as preview.",
+          "type": "boolean"
+        }
+      }
+    },
+    "assignments": {
+      "description": "Named users for a Direct-assignment personal pool. Each user owns one session host (by zero-based host index). The deploy stage sets the host's assigned user and adds the user to accessGroups.usersObjectId with the operator's delegated permission.",
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["userPrincipalName", "objectId", "hostIndex"],
+        "properties": {
+          "userPrincipalName": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 113,
+            "pattern": "^[^@\\s]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$"
+          },
+          "objectId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "hostIndex": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 99
+          }
         }
       }
     },
@@ -214,6 +310,247 @@
         "sessionHostPrepSha256": {
           "type": "string",
           "pattern": "^[A-Fa-f0-9]{64}$"
+        }
+      }
+    },
+    "scaling": {
+      "description": "Optional AVD autoscale (power management) for the host pool. Starts and stops existing session hosts only; it never creates or deletes hosts. Schedule shape follows hostPool.type (pooled by default). Requires the subscription-scope power-management prerequisite in docs/permission-matrix.md.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "timeZone", "schedules"],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "timeZone": {
+          "description": "Windows time zone ID, for example 'GMT Standard Time'.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9 .()+\\-]+$"
+        },
+        "exclusionTag": {
+          "description": "Tag name that excludes a session host from scaling, e.g. during maintenance.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[^<>%&\\\\?/]+$"
+        },
+        "schedules": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 7,
+          "items": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    "workload": {
+      "description": "Sizing questionnaire answers recorded for review and re-sizing. sessionHosts and hostPool hold the resulting (optionally overridden) values.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hosting", "persona", "users", "peakConcurrencyPct"],
+      "properties": {
+        "hosting": {
+          "type": "string",
+          "enum": ["Shared", "Dedicated"]
+        },
+        "persona": {
+          "type": "string",
+          "enum": ["Frontline", "Standard", "Heavy"]
+        },
+        "users": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5000
+        },
+        "peakConcurrencyPct": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        }
+      }
+    },
+    "hostPool": {
+      "description": "Host pool behaviour. Pooled = shared multi-session hosts; Personal = one dedicated VM per user. Omit for the legacy pooled default (5 sessions, breadth-first).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["Pooled", "Personal"]
+        },
+        "maxSessionLimit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 999
+        },
+        "loadBalancer": {
+          "$ref": "#/definitions/loadBalancing"
+        },
+        "assignmentType": {
+          "type": "string",
+          "enum": ["Automatic", "Direct"]
+        }
+      },
+      "if": {
+        "properties": { "type": { "const": "Personal" } }
+      },
+      "then": {
+        "required": ["assignmentType"],
+        "not": { "anyOf": [{ "required": ["maxSessionLimit"] }, { "required": ["loadBalancer"] }] }
+      },
+      "else": {
+        "required": ["maxSessionLimit", "loadBalancer"],
+        "not": { "required": ["assignmentType"] }
+      }
+    }
+  },
+  "definitions": {
+    "time": {
+      "type": "string",
+      "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+    },
+    "loadBalancing": {
+      "type": "string",
+      "enum": ["BreadthFirst", "DepthFirst"]
+    },
+    "percentage": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "capacityThreshold": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100
+    },
+    "scheduleName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9-_]*$"
+    },
+    "daysOfWeek": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 7,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+      }
+    },
+    "waitMinutes": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 720
+    },
+    "personalAction": {
+      "description": "Hibernate is excluded because FSLogix profile containers do not support it.",
+      "type": "string",
+      "enum": ["None", "Deallocate"]
+    },
+    "personalPhase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["startTime", "startVMOnConnect", "actionOnDisconnect", "minutesToWaitOnDisconnect", "actionOnLogoff", "minutesToWaitOnLogoff"],
+      "properties": {
+        "startTime": { "$ref": "#/definitions/time" },
+        "startVMOnConnect": { "type": "boolean" },
+        "actionOnDisconnect": { "$ref": "#/definitions/personalAction" },
+        "minutesToWaitOnDisconnect": { "$ref": "#/definitions/waitMinutes" },
+        "actionOnLogoff": { "$ref": "#/definitions/personalAction" },
+        "minutesToWaitOnLogoff": { "$ref": "#/definitions/waitMinutes" }
+      }
+    },
+    "personalSchedule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "daysOfWeek", "rampUp", "peak", "rampDown", "offPeak"],
+      "properties": {
+        "name": { "$ref": "#/definitions/scheduleName" },
+        "daysOfWeek": { "$ref": "#/definitions/daysOfWeek" },
+        "rampUp": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["startTime", "autoStartHosts", "startVMOnConnect", "actionOnDisconnect", "minutesToWaitOnDisconnect", "actionOnLogoff", "minutesToWaitOnLogoff"],
+          "properties": {
+            "startTime": { "$ref": "#/definitions/time" },
+            "autoStartHosts": {
+              "type": "string",
+              "enum": ["None", "WithAssignedUser", "All"]
+            },
+            "startVMOnConnect": { "type": "boolean" },
+            "actionOnDisconnect": { "$ref": "#/definitions/personalAction" },
+            "minutesToWaitOnDisconnect": { "$ref": "#/definitions/waitMinutes" },
+            "actionOnLogoff": { "$ref": "#/definitions/personalAction" },
+            "minutesToWaitOnLogoff": { "$ref": "#/definitions/waitMinutes" }
+          }
+        },
+        "peak": { "$ref": "#/definitions/personalPhase" },
+        "rampDown": { "$ref": "#/definitions/personalPhase" },
+        "offPeak": { "$ref": "#/definitions/personalPhase" }
+      }
+    },
+    "pooledSchedule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "daysOfWeek", "rampUp", "peak", "rampDown", "offPeak"],
+      "properties": {
+        "name": { "$ref": "#/definitions/scheduleName" },
+        "daysOfWeek": { "$ref": "#/definitions/daysOfWeek" },
+        "rampUp": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["startTime", "minimumHostsPct", "capacityThresholdPct", "loadBalancing"],
+          "properties": {
+            "startTime": { "$ref": "#/definitions/time" },
+            "minimumHostsPct": { "$ref": "#/definitions/percentage" },
+            "capacityThresholdPct": { "$ref": "#/definitions/capacityThreshold" },
+            "loadBalancing": { "$ref": "#/definitions/loadBalancing" }
+          }
+        },
+        "peak": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["startTime", "loadBalancing"],
+          "properties": {
+            "startTime": { "$ref": "#/definitions/time" },
+            "loadBalancing": { "$ref": "#/definitions/loadBalancing" }
+          }
+        },
+        "rampDown": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["startTime", "minimumHostsPct", "capacityThresholdPct", "loadBalancing", "forceLogoffUsers", "waitTimeMinutes", "stopHostsWhen"],
+          "properties": {
+            "startTime": { "$ref": "#/definitions/time" },
+            "minimumHostsPct": { "$ref": "#/definitions/percentage" },
+            "capacityThresholdPct": { "$ref": "#/definitions/capacityThreshold" },
+            "loadBalancing": { "$ref": "#/definitions/loadBalancing" },
+            "forceLogoffUsers": { "type": "boolean" },
+            "waitTimeMinutes": { "$ref": "#/definitions/waitMinutes" },
+            "notificationMessage": {
+              "type": "string",
+              "maxLength": 512
+            },
+            "stopHostsWhen": {
+              "type": "string",
+              "enum": ["ZeroSessions", "ZeroActiveSessions"]
+            }
+          }
+        },
+        "offPeak": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["startTime", "loadBalancing"],
+          "properties": {
+            "startTime": { "$ref": "#/definitions/time" },
+            "loadBalancing": { "$ref": "#/definitions/loadBalancing" }
+          }
         }
       }
     }

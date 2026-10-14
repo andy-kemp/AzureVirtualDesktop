@@ -14,6 +14,10 @@ Everything new stays under `v2/`. Do not alter root-level scripts, templates, te
 
 Phase 1 needs parity tests, independent artifacts and explicit migration boundaries. Any adoption of existing deployments requires a reviewed plan, not automatic RBAC/resource-name reconciliation. This documentation session neither implements nor deploys V2.
 
+Exceptions approved by the repository owner are recorded here:
+
+- 2026-10-14: root `modules/platform.bicep` Start VM on Connect assignment corrected to the built-in *Desktop Virtualization Power On Contributor* role ID (`489581de-a3bd-480d-9518-53dea7416b33`). The previous ID matched no built-in role, so the assignment could not succeed.
+
 ## Alternatives rejected
 
 In-place legacy refactoring, moving root files, or changing existing tests would violate the compatibility boundary. A new repository is not required for the MVP distribution.

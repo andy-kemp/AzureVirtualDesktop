@@ -1,0 +1,3 @@
+# Local sandbox configurations and Preview plans can contain real tenant, subscription and user IDs.
+sandbox/
+*.plan.json

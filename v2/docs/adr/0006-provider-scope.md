@@ -12,7 +12,7 @@ Phase 1 preserves current AVD behaviour using versioned configuration, isolated 
 
 ## Consequences
 
-Preserve incremental deployments, stable host names, token cleanup and no automatic rollback/draining. Existing groups/networks, Azure Files hybrid Kerberos, consent, ACLs and DNS prerequisites remain explicit. Licence checking is not proof of user readiness. Verified v1.0 Cloud PC inventory does not yet establish complete provisioning-status observation; track that gap before the W365 phase.
+Preserve incremental deployments, stable host names, token cleanup and no automatic rollback/draining by the worker. Day-to-day power scaling is delegated to the native AVD service ([ADR 0009](0009-native-avd-autoscale.md)). Existing groups/networks, Azure Files Microsoft Entra Kerberos (hybrid, or cloud-only preview, per [ADR 0011](0011-user-profiles.md)), consent, ACLs and DNS prerequisites remain explicit. Licence checking is not proof of user readiness. Verified v1.0 Cloud PC inventory does not yet establish complete provisioning-status observation; track that gap before the W365 phase.
 
 ## Alternatives rejected
 

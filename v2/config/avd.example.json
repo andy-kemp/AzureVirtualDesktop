@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "1.0.0",
+  "schemaVersion": "1.2.0",
   "tenantId": "11111111-1111-4111-8111-111111111111",
   "subscriptionId": "22222222-2222-4222-8222-222222222222",
   "target": {
@@ -32,15 +32,89 @@
     "usersObjectId": "44444444-4444-4444-8444-444444444444",
     "adminsObjectId": "55555555-5555-4555-8555-555555555555"
   },
+  "workload": {
+    "hosting": "Shared",
+    "persona": "Standard",
+    "users": 40,
+    "peakConcurrencyPct": 80
+  },
+  "hostPool": {
+    "type": "Pooled",
+    "maxSessionLimit": 32,
+    "loadBalancer": "BreadthFirst"
+  },
   "sessionHosts": {
     "namePrefix": "AVDHOST",
     "count": 2,
-    "vmSize": "Standard_D2as_v5",
+    "vmSize": "Standard_D8s_v5",
     "adminUsername": "AVD-Admin",
     "adminPasswordSecretUri": "https://avd-example.vault.azure.net/secrets/session-host-admin-password"
   },
   "artifacts": {
     "sessionHostPrepUri": "https://artifacts.example.invalid/avd/session-host-prep.ps1",
     "sessionHostPrepSha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "scaling": {
+    "enabled": true,
+    "timeZone": "GMT Standard Time",
+    "exclusionTag": "AVD-ScalingExclude",
+    "schedules": [
+      {
+        "name": "weekdays",
+        "daysOfWeek": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+        "rampUp": {
+          "startTime": "07:00",
+          "minimumHostsPct": 20,
+          "capacityThresholdPct": 3,
+          "loadBalancing": "BreadthFirst"
+        },
+        "peak": {
+          "startTime": "09:00",
+          "loadBalancing": "BreadthFirst"
+        },
+        "rampDown": {
+          "startTime": "17:30",
+          "minimumHostsPct": 1,
+          "capacityThresholdPct": 90,
+          "loadBalancing": "DepthFirst",
+          "forceLogoffUsers": false,
+          "waitTimeMinutes": 30,
+          "notificationMessage": "This session host will shut down soon. Please save your work and sign out.",
+          "stopHostsWhen": "ZeroSessions"
+        },
+        "offPeak": {
+          "startTime": "19:00",
+          "loadBalancing": "DepthFirst"
+        }
+      },
+      {
+        "name": "weekend",
+        "daysOfWeek": ["Saturday", "Sunday"],
+        "rampUp": {
+          "startTime": "09:00",
+          "minimumHostsPct": 1,
+          "capacityThresholdPct": 90,
+          "loadBalancing": "DepthFirst"
+        },
+        "peak": {
+          "startTime": "10:00",
+          "loadBalancing": "DepthFirst"
+        },
+        "rampDown": {
+          "startTime": "16:00",
+          "minimumHostsPct": 1,
+          "capacityThresholdPct": 90,
+          "loadBalancing": "DepthFirst",
+          "forceLogoffUsers": false,
+          "waitTimeMinutes": 30,
+          "notificationMessage": "This session host will shut down soon. Please save your work and sign out.",
+          "stopHostsWhen": "ZeroSessions"
+        },
+        "offPeak": {
+          "startTime": "18:00",
+          "loadBalancing": "DepthFirst"
+        }
+      }
+    ]
   }
 }

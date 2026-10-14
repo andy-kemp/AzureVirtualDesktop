@@ -1,0 +1,34 @@
+{
+  "version": "1.0.0",
+  "source": "https://learn.microsoft.com/en-us/windows-server/remote/remote-desktop-services/session-host-virtual-machine-sizing-guidelines",
+  "notes": "Starting estimates only. Validate density with a pilot and monitoring before production sign-off.",
+  "shared": {
+    "vmSize": "Standard_D8s_v5",
+    "vcpus": 8,
+    "spareHosts": 1,
+    "loadBalancer": "BreadthFirst"
+  },
+  "personas": {
+    "Frontline": {
+      "label": "Frontline worker",
+      "description": "Web or line-of-business app access over anything else; light browsing and data entry.",
+      "microsoftWorkload": "Light",
+      "usersPerVcpu": 6,
+      "dedicatedVmSize": "Standard_D2s_v5"
+    },
+    "Standard": {
+      "label": "Standard office worker",
+      "description": "Microsoft 365 apps (Word, Excel, Outlook) and Teams chat with typical multitasking.",
+      "microsoftWorkload": "Medium",
+      "usersPerVcpu": 4,
+      "dedicatedVmSize": "Standard_D4s_v5"
+    },
+    "Heavy": {
+      "label": "Heavy office worker",
+      "description": "Heavy Outlook/PowerPoint, frequent Teams meetings, many browser tabs or developer tools.",
+      "microsoftWorkload": "Heavy",
+      "usersPerVcpu": 2,
+      "dedicatedVmSize": "Standard_D8s_v5"
+    }
+  }
+}

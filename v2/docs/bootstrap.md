@@ -6,7 +6,16 @@ Status: installation design only; the bootstrap script and Bicep do not yet exis
 
 Use a reviewed, pinned release of this repo on an administrator-controlled machine. Verify release/source integrity and dependency digests before signing in; do not pipe a remote branch script into an elevated shell. Choose the tenant/subscription/region, dedicated portal resource group, approved workload targets, existing network/group IDs, certificate lifecycle, budget and retention. Entra ID P1/P2 is required for group-based application assignment. The customer's admin retains all ownership; no vendor users, credentials, telemetry endpoint or standing access are installed.
 
-Prepare existing AVD groups/VNet/subnets and hybrid Azure Files Kerberos prerequisites. The Microsoft-owned AVD service principal must exist. Bootstrap records its tenant-specific object ID, but does not grant blanket consent, change Conditional Access, administer Windows DNS or set share ACLs. Customer administrators complete those workload prerequisites separately.
+Prepare existing AVD groups/VNet/subnets and hybrid Azure Files Kerberos prerequisites. The Microsoft-owned AVD service principal must exist. Bootstrap records its tenant-specific object ID, but does not grant blanket consent, change Conditional Access, administer Windows DNS or set share ACLs. Customer administrators complete those workload prerequisites separately. If AVD scaling will be used, a customer Azure access administrator assigns *Desktop Virtualization Power On Off Contributor* to that service principal at each workload **subscription** scope ([ADR 0009](adr/0009-native-avd-autoscale.md)). Bootstrap may offer this as an explicit, separately approved step. The runtime never makes this grant.
+
+For **cloud-only FSLogix (preview)**, a customer Entra administrator completes the steps in [ADR 0011](adr/0011-user-profiles.md) after the storage account exists:
+
+- Admin consent for the storage account's Entra app.
+- The cloud group SID manifest tag.
+- A Conditional Access MFA exclusion scoped to that app only.
+- Share and folder permissions.
+
+For **dedicated named users** ([ADR 0012](adr/0012-expansion-and-dedicated-users.md)), give the portal operators group the right to manage the AVD users group's membership, for example as group owners or through an administrative-unit-scoped Groups Administrator role. Consent the delegated `User.ReadBasic.All` and `GroupMember.ReadWrite.All` scopes for the API.
 
 ## Privileged steps
 

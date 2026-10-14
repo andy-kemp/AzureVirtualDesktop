@@ -59,12 +59,14 @@ resource vmLogin 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for ass
   }
 }]
 
+// Desktop Virtualization Power On Contributor (Start VM on Connect).
+var powerOnRole = '489581de-a3bd-480d-9518-53dea7416b33'
 resource startOnConnect 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(resourceGroup().id, avdServicePrincipalOid, '489581de-a3bd-480d-9518-53dea678e6c7')
+  name: guid(resourceGroup().id, avdServicePrincipalOid, powerOnRole)
   properties: {
     principalId: avdServicePrincipalOid
     principalType: 'ServicePrincipal'
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '489581de-a3bd-480d-9518-53dea678e6c7')
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', powerOnRole)
   }
 }
 
