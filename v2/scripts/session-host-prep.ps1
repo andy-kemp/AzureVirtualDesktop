@@ -8,7 +8,9 @@ param(
     [ValidateSet('FSLogix', 'Local')]
     [string]$ProfileMode = 'FSLogix',
     [string]$ProfilesPath,
-    [string]$RedirectionPath
+    [string]$RedirectionPath,
+    # Block sign-in instead of issuing a temporary profile when the container cannot attach.
+    [switch]$PreventTempProfile
 )
 
 $ErrorActionPreference = 'Stop'
@@ -19,12 +21,19 @@ if ($ProfileMode -eq 'FSLogix') {
     }
 
     # Retrieve the Microsoft Entra Kerberos ticket at sign-in so Azure Files accepts the user's identity
-    # (hybrid and cloud-only identities).
+    # (hybrid and cloud-only identities). Takes effect after a restart, which Deploy performs once hosts register.
     $kerberosPath = 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\Kerberos\Parameters'
     if (-not (Test-Path $kerberosPath)) {
         New-Item -Path $kerberosPath -Force | Out-Null
     }
     New-ItemProperty -Path $kerberosPath -Name 'CloudKerberosTicketRetrievalEnabled' -Value 1 -PropertyType DWord -Force | Out-Null
+
+    # Entra ID with roaming profiles: load Credential Manager keys from the profile so tokens work on any host.
+    $credentialKeyPath = 'HKLM:\SOFTWARE\Policies\Microsoft\AzureADAccount'
+    if (-not (Test-Path $credentialKeyPath)) {
+        New-Item -Path $credentialKeyPath -Force | Out-Null
+    }
+    New-ItemProperty -Path $credentialKeyPath -Name 'LoadCredKeyFromProfile' -Value 1 -PropertyType DWord -Force | Out-Null
 
     $profilesKey = 'HKLM:\SOFTWARE\FSLogix\Profiles'
     if (-not (Test-Path $profilesKey)) {
@@ -36,6 +45,9 @@ if ($ProfileMode -eq 'FSLogix') {
     New-ItemProperty -Path $profilesKey -Name 'FlipFlopProfileDirectoryName' -Value 1 -PropertyType DWord -Force | Out-Null
     New-ItemProperty -Path $profilesKey -Name 'DeleteLocalProfileWhenVHDShouldApply' -Value 1 -PropertyType DWord -Force | Out-Null
     New-ItemProperty -Path $profilesKey -Name 'RedirXMLSourceFolder' -Value $RedirectionPath -PropertyType String -Force | Out-Null
+    $prevent = if ($PreventTempProfile) { 1 } else { 0 }
+    New-ItemProperty -Path $profilesKey -Name 'PreventLoginWithFailure' -Value $prevent -PropertyType DWord -Force | Out-Null
+    New-ItemProperty -Path $profilesKey -Name 'PreventLoginWithTempProfile' -Value $prevent -PropertyType DWord -Force | Out-Null
 } else {
     # Dedicated hosts keep the user profile on the VM, like Windows 365. Make sure FSLogix is not left enabled
     # by an image or earlier configuration.
@@ -45,6 +57,8 @@ if ($ProfileMode -eq 'FSLogix') {
     }
 }
 
+# Consumer and inbox apps only. Framework packages (WindowsAppRuntime) and shell components (Start menu, people
+# and print experience hosts, capture picker and similar) are deliberately kept: removing them breaks Windows or apps.
 $appsToRemove = @(
     'Clipchamp.Clipchamp'
     'Microsoft.BingNews'
@@ -56,38 +70,17 @@ $appsToRemove = @(
     'Microsoft.MicrosoftSolitaireCollection'
     'Microsoft.MicrosoftStickyNotes'
     'Microsoft.OutlookForWindows'
-    'Microsoft.Paint'
     'Microsoft.People'
     'Microsoft.PowerAutomateDesktop'
-    'Microsoft.RawImageExtension'
-    'Microsoft.ScreenSketch'
-    'Microsoft.StorePurchaseApp'
     'Microsoft.Todos'
-    'Microsoft.WebMediaExtensions'
-    'Microsoft.WebpImageExtension'
-    'Microsoft.Windows.AugLoop.CBS'
-    'Microsoft.Windows.CapturePicker'
     'Microsoft.Windows.DevHome'
-    'Microsoft.Windows.NarratorQuickStart'
-    'Microsoft.Windows.ParentalControls'
-    'Microsoft.Windows.PeopleExperienceHost'
-    'Microsoft.Windows.Photos'
-    'Microsoft.Windows.PinningConfirmationDialog'
-    'Microsoft.Windows.PrintQueueActionCenter'
-    'Microsoft.Windows.StartMenuExperienceHost'
-    'Microsoft.Windows.XGpuEjectDialog'
     'Microsoft.WindowsAlarms'
-    'Microsoft.WindowsAppRuntime.CBS'
-    'Microsoft.WindowsAppRuntime.CBS.1.6'
-    'Microsoft.WindowsCalculator'
     'Microsoft.WindowsCamera'
     'Microsoft.WindowsCommunicationsApps'
     'Microsoft.WindowsFeedbackHub'
     'Microsoft.WindowsMaps'
     'Microsoft.WindowsSoundRecorder'
-    'Microsoft.WindowsStore'
     'Microsoft.Xbox.TCUI'
-    'Microsoft.XboxGameCallableUI'
     'Microsoft.XboxGameOverlay'
     'Microsoft.XboxGamingOverlay'
     'Microsoft.XboxIdentityProvider'
@@ -96,9 +89,6 @@ $appsToRemove = @(
     'Microsoft.ZuneMusic'
     'Microsoft.ZuneVideo'
     'MicrosoftCorporationII.QuickAssist'
-    'MicrosoftTeams'
-    'MSTeams'
-    'Windows.CBSPreview'
     '*Microsoft.Getstarted*'
 )
 

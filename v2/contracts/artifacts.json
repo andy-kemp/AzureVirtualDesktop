@@ -1,0 +1,8 @@
+{
+  "description": "Release-pinned artifacts used by avd.ps1 -Mode New. Update together with any change to v2/scripts/session-host-prep.ps1: publish, then record the commit-pinned URI and the SHA-256 of the downloaded file.",
+  "sessionHostPrep": {
+    "commit": "bb307d8c6c726b64bd089d0570ba8494457bb3b5",
+    "uri": "https://raw.githubusercontent.com/andy-kemp/AzureVirtualDesktop/bb307d8c6c726b64bd089d0570ba8494457bb3b5/v2/scripts/session-host-prep.ps1",
+    "sha256": "804ec70bbe5c5d3f2c70c153397eb8ee331701619709c746f275adb50e6f6bed"
+  }
+}

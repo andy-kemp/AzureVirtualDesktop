@@ -29,9 +29,11 @@ From Microsoft's documentation:
 - Add the cloud group SID tag to that application's manifest. Without it, cloud-only authentication fails.
 - Exclude that application from Conditional Access policies that require MFA. Entra Kerberos to Azure Files does not support MFA.
 - Allow symmetric keys on the Storage Resource Provider service principal if app management policies block them.
-- Assign share-level permissions. The current templates give the AVD users and admins groups their FSLogix roles. Windows ACLs cannot be set from File Explorer for cloud-only identities; the supported way to set the FSLogix folder ACLs needs sandbox verification before this profile is used beyond a pilot.
+- Assign share-level permissions. The current templates give the AVD users and admins groups their FSLogix roles. Windows ACLs cannot be set from File Explorer for cloud-only identities.
 
 Hybrid identities keep their existing prerequisites (synced users and groups, and ACLs set from a machine that can reach a domain controller).
+
+Update (2026-10-14, [ADR 0015](0015-post-deploy-configuration.md)): `-Mode PostDeploy` (or `Deploy -PostDeploy`) automates the consent, the cloud-group tag, the `privatelink` identifier URIs that the private endpoint needs, the MFA Conditional Access exclusion (with confirmation) and the FSLogix folder ACLs over the Files REST API. Host prep also sets `LoadCredKeyFromProfile`, which Microsoft requires for Entra ID with roaming profiles, and Deploy restarts new hosts so the Kerberos setting applies.
 
 ## Consequences
 

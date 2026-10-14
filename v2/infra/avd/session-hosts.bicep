@@ -36,13 +36,15 @@ param hostPoolType string = 'Pooled'
 @description('FSLogix configures profile containers on Azure Files; Local keeps profiles on the VM (dedicated hosts).')
 @allowed(['FSLogix', 'Local'])
 param profileMode string = 'FSLogix'
+@description('FSLogix only: block sign-in instead of issuing a temporary profile when the container cannot attach.')
+param preventTempProfile bool = false
 
 var fsProfilesPath = '\\\\${storageAccountName}.file.${environment().suffixes.storage}\\profiles'
 var fsRedirectionPath = '\\\\${storageAccountName}.file.${environment().suffixes.storage}\\redirections'
 var modulesURL = 'https://wvdportalstorageblob.blob.${environment().suffixes.storage}/galleryartifacts/Configuration_1.0.02797.442.zip'
 var sessionHostPrepScriptName = substring(sessionHostPrepScriptUrl, lastIndexOf(sessionHostPrepScriptUrl, '/') + 1)
 var sessionHostPrepArguments = profileMode == 'FSLogix'
-  ? '-ProfileMode FSLogix -ProfilesPath "${fsProfilesPath}" -RedirectionPath "${fsRedirectionPath}"'
+  ? '-ProfileMode FSLogix -ProfilesPath "${fsProfilesPath}" -RedirectionPath "${fsRedirectionPath}"${preventTempProfile ? ' -PreventTempProfile' : ''}'
   : '-ProfileMode Local'
 var dnsServers = concat(empty(dns1) ? [] : [dns1], empty(dns2) ? [] : [dns2])
 

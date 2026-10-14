@@ -117,7 +117,7 @@ try {
 
     $invalidTimeFormat = Copy-Configuration
     $invalidTimeFormat.scaling.schedules[0].peak.startTime = '9am'
-    Invoke-InvalidConfigurationCase -Value $invalidTimeFormat -Name 'invalid-time-format'
+    Invoke-InvalidConfigurationCase -Value $invalidTimeFormat -Name 'invalid-time-format' -Expected 'peak.startTime'
     Write-Pass 'invalid scaling time format is rejected.'
 
     $outOfOrder = Copy-Configuration
@@ -137,7 +137,7 @@ try {
 
     $badThreshold = Copy-Configuration
     $badThreshold.scaling.schedules[0].rampUp.capacityThresholdPct = 0
-    Invoke-InvalidConfigurationCase -Value $badThreshold -Name 'invalid-capacity-threshold'
+    Invoke-InvalidConfigurationCase -Value $badThreshold -Name 'invalid-capacity-threshold' -Expected 'capacityThresholdPct'
     Write-Pass 'out-of-range scaling capacity threshold is rejected.'
 
     # Persona sizing rules
@@ -207,7 +207,7 @@ try {
 
     # Questionnaire (New mode, non-interactive)
     $sharedPath = Join-Path $temporaryDirectory 'new-shared.json'
-    $sharedText = (& $cliPath -Mode New -OutputFile $sharedPath -Hosting Shared -Persona Frontline -Users 120 -PeakConcurrencyPct 75 -UserIdentity Hybrid -ScalingPreset BusinessHours -TimeZone 'GMT Standard Time' -WorkdayStart '07:30' -WorkdayEnd '17:30' 6>$null) -join "`n"
+    $sharedText = (& $cliPath -Mode New -Offline -OutputFile $sharedPath -Hosting Shared -Persona Frontline -Users 120 -PeakConcurrencyPct 75 -UserIdentity Hybrid -ScalingPreset BusinessHours -TimeZone 'GMT Standard Time' -WorkdayStart '07:30' -WorkdayEnd '17:30' 6>$null) -join "`n"
     $shared = Get-Content -LiteralPath $sharedPath -Raw | ConvertFrom-Json -AsHashtable
     Assert-True ($sharedText -match 'Configuration written' -and $shared.schemaVersion -eq '1.3.0' -and $shared.profile -eq 'AzureFilesHybridKerberos') 'New shared hybrid configuration was not written as 1.3.0 with hybrid FSLogix.'
     Assert-True ($shared.hostPool.type -eq 'Pooled' -and $shared.hostPool.maxSessionLimit -eq 48 -and $shared.sessionHosts.count -eq 3) 'New shared Frontline 120 users @75% should be 3 hosts at 48 sessions.'
@@ -219,7 +219,7 @@ try {
     Write-Pass 'New mode writes a valid shared configuration from the questionnaire answers.'
 
     $dedicatedPath = Join-Path $temporaryDirectory 'new-dedicated.json'
-    $null = & $cliPath -Mode New -OutputFile $dedicatedPath -Hosting Dedicated -Persona Heavy -Users 8 -ScalingPreset BusinessHours -TimeZone 'GMT Standard Time' -WorkdayStart '08:00' -WorkdayEnd '18:00' 6>$null
+    $null = & $cliPath -Mode New -Offline -OutputFile $dedicatedPath -Hosting Dedicated -Persona Heavy -Users 8 -ScalingPreset BusinessHours -TimeZone 'GMT Standard Time' -WorkdayStart '08:00' -WorkdayEnd '18:00' 6>$null
     $dedicatedConfig = Get-Content -LiteralPath $dedicatedPath -Raw | ConvertFrom-Json -AsHashtable
     Assert-True ($dedicatedConfig.hostPool.type -eq 'Personal' -and $dedicatedConfig.sessionHosts.count -eq 8 -and $dedicatedConfig.sessionHosts.vmSize -eq 'Standard_D8s_v5') 'New dedicated Heavy 8 users should be 8 personal D8s_v5 hosts.'
     Assert-True ($dedicatedConfig.scaling.schedules[0].rampUp.autoStartHosts -eq 'None' -and $dedicatedConfig.scaling.schedules[0].peak.startVMOnConnect) 'Dedicated schedule should rely on Start VM on Connect.'
@@ -227,7 +227,7 @@ try {
     Write-Pass 'New mode writes a valid dedicated configuration with local profiles, direct assignment and personal schedules.'
 
     $cloudPath = Join-Path $temporaryDirectory 'new-cloud-only.json'
-    $cloudText = (& $cliPath -Mode New -OutputFile $cloudPath -Hosting Shared -Persona Standard -Users 60 -PeakConcurrencyPct 80 -UserIdentity CloudOnly -ScalingPreset None 6>$null) -join "`n"
+    $cloudText = (& $cliPath -Mode New -Offline -OutputFile $cloudPath -Hosting Shared -Persona Standard -Users 60 -PeakConcurrencyPct 80 -UserIdentity CloudOnly -ScalingPreset None 6>$null) -join "`n"
     $cloud = Get-Content -LiteralPath $cloudPath -Raw | ConvertFrom-Json -AsHashtable
     Assert-True ($cloud.profile -eq 'AzureFilesEntraKerberosCloudOnly' -and $cloud.storage.acknowledgePreview -and -not $cloud.identity.ContainsKey('kerberosDomainGuid')) 'Cloud-only shared pools should acknowledge the preview and drop hybrid domain details.'
     Assert-True ($cloudText -match 'cloud-only identities - Microsoft PREVIEW') 'Cloud-only summary should flag the Microsoft preview.'
@@ -285,7 +285,7 @@ try {
 
     # Dedicated user assignment
     $assignPath = Join-Path $temporaryDirectory 'assign.json'
-    $null = & $cliPath -Mode New -OutputFile $assignPath -Hosting Dedicated -Persona Standard -Users 1 -ScalingPreset None 6>$null
+    $null = & $cliPath -Mode New -Offline -OutputFile $assignPath -Hosting Dedicated -Persona Standard -Users 1 -ScalingPreset None 6>$null
     Remove-Item Function:\Get-MgContext, Function:\Invoke-MgGraphRequest -ErrorAction SilentlyContinue
     if (-not (Get-Command Get-MgContext -ErrorAction SilentlyContinue)) {
         Assert-Throws -Name 'adduser-without-graph' -Expected 'Connect-MgGraph' -Action { & $cliPath -Mode AddUser -ConfigurationFile $assignPath -UserPrincipalName 'jane.doe@example.com' 6>$null }
@@ -326,17 +326,17 @@ try {
     Write-Pass 'hibernate is rejected because FSLogix profiles do not support it.'
 
     $noScalingPath = Join-Path $temporaryDirectory 'new-no-scaling.json'
-    $null = & $cliPath -Mode New -OutputFile $noScalingPath -Hosting Shared -Persona Standard -Users 20 -PeakConcurrencyPct 100 -UserIdentity Hybrid -ScalingPreset None 6>$null
+    $null = & $cliPath -Mode New -Offline -OutputFile $noScalingPath -Hosting Shared -Persona Standard -Users 20 -PeakConcurrencyPct 100 -UserIdentity Hybrid -ScalingPreset None 6>$null
     Assert-True (-not (Get-Content -LiteralPath $noScalingPath -Raw | ConvertFrom-Json -AsHashtable).ContainsKey('scaling')) 'Always-available preset should not write a scaling plan.'
     Assert-Throws -Name 'overwrite' -Expected 'already exists' -Action {
-        & $cliPath -Mode New -OutputFile $noScalingPath -Hosting Shared -Persona Standard -Users 20 -PeakConcurrencyPct 100 -UserIdentity Hybrid -ScalingPreset None 6>$null
+        & $cliPath -Mode New -Offline -OutputFile $noScalingPath -Hosting Shared -Persona Standard -Users 20 -PeakConcurrencyPct 100 -UserIdentity Hybrid -ScalingPreset None 6>$null
     }
     Write-Pass 'always-available preset omits scaling and existing files are not overwritten without -Force.'
 
     # Bicep
     $buildOutput = & $cliPath -Mode Build -ConfigurationFile $examplePath
-    Assert-True (($buildOutput | Where-Object { $_ -match '^Bicep compiled:' }).Count -eq 2) 'Build did not compile both AVD templates.'
-    Write-Pass 'both isolated AVD Bicep entry points compile offline.'
+    Assert-True (($buildOutput | Where-Object { $_ -match '^Bicep compiled:' }).Count -eq 3) 'Build did not compile the foundation, platform and session-host templates.'
+    Write-Pass 'foundation, platform and session-host Bicep entry points compile offline.'
 
     $bicep = Get-Command bicep -ErrorAction SilentlyContinue
     $compileTemplate = {
@@ -361,6 +361,27 @@ try {
     Assert-True ($platformText -match "equals\(parameters\('profile'\), 'AzureFilesHybridKerberos'\)") 'Only the hybrid profile should send AD domain details to Azure Files.'
     Write-Pass 'platform template deploys FSLogix storage only for shared profiles, with cloud-only omitting AD domain details.'
 
+    # ARM rejects a template that declares the same resource twice (for example a create and an `existing` reference),
+    # even though what-if accepts it. Check every compiled template, including nested module templates.
+    $findDuplicates = {
+        param($Template, [string]$Path)
+        $resources = if ($Template.resources -is [System.Collections.IDictionary]) { @($Template.resources.Values) } else { @($Template.resources) }
+        $seen = @{}
+        foreach ($resource in $resources) {
+            $key = "$($resource.type)|$($resource.name)"
+            if ($seen.ContainsKey($key)) { "$Path declares $key twice" }
+            $seen[$key] = $true
+            if ($resource.type -eq 'Microsoft.Resources/deployments' -and $resource.properties.template) {
+                & $findDuplicates $resource.properties.template "$Path > $($resource.name)"
+            }
+        }
+    }
+    $duplicates = foreach ($entry in 'foundation.bicep', 'platform.bicep', 'session-hosts.bicep') {
+        $compiled = (& $compileTemplate (Join-Path $v2Root "infra/avd/$entry")) | ConvertFrom-Json -AsHashtable -Depth 64
+        & $findDuplicates $compiled $entry
+    }
+    Assert-True (@($duplicates).Count -eq 0) "Templates declare a resource more than once: $(@($duplicates) -join '; ')"
+    Write-Pass 'no compiled template declares the same resource twice.'
     $prepPath = Join-Path $v2Root 'scripts/session-host-prep.ps1'
     $tokens = $null
     $parseErrors = $null
@@ -368,6 +389,23 @@ try {
     $profileModeParameter = $prepAst.ParamBlock.Parameters | Where-Object { $_.Name.VariablePath.UserPath -eq 'ProfileMode' }
     Assert-True ($parseErrors.Count -eq 0 -and $profileModeParameter) 'The V2 session host prep script must parse and accept -ProfileMode.'
     Write-Pass 'V2 session host prep script parses and supports FSLogix and local profile modes.'
+
+    $prepText = [System.IO.File]::ReadAllText($prepPath)
+    $preventParameter = $prepAst.ParamBlock.Parameters | Where-Object { $_.Name.VariablePath.UserPath -eq 'PreventTempProfile' }
+    Assert-True ($preventParameter -and $prepText -match "'LoadCredKeyFromProfile'" -and $prepText -match "'PreventLoginWithTempProfile'") 'Host prep must load credential keys from the profile and support blocking temporary profiles.'
+    Assert-True ($prepText -notmatch "'Microsoft\.Windows\.StartMenuExperienceHost'|'Microsoft\.WindowsAppRuntime|'Microsoft\.WindowsStore'") 'Host prep must not remove shell components, framework packages or the Store.'
+    Write-Pass 'host prep sets LoadCredKeyFromProfile and keeps Windows shell and framework packages.'
+
+    $displayConfiguration = Copy-Configuration
+    $displayConfiguration.display = [ordered]@{ workspaceName = 'Contoso Workspace'; desktopName = 'Contoso Desktop' }
+    $displayConfiguration.fslogix = [ordered]@{ preventTempProfile = $true }
+    Invoke-InvalidConfigurationCase -Value $displayConfiguration -Name 'display-needs-1-5-0'
+    $displayConfiguration.schemaVersion = '1.5.0'
+    $displayText = (& $cliPath -Mode Validate -ConfigurationFile (Save-Configuration -Value $displayConfiguration -Name 'display-valid')) -join "`n"
+    Assert-True ($displayText -match "Users see: workspace 'Contoso Workspace', desktop 'Contoso Desktop'" -and $displayText -match 'sign-in is blocked if the profile cannot attach') 'A 1.5.0 configuration with display names and FSLogix options should validate and be summarised.'
+    $displayConfiguration.display.desktopName = '<script>'
+    Invoke-InvalidConfigurationCase -Value $displayConfiguration -Name 'display-markup'
+    Write-Pass 'contract 1.5.0 adds display names and FSLogix options and rejects them on older versions.'
 
     Write-Host "$script:passed Phase 1 CLI tests passed."
 } finally {

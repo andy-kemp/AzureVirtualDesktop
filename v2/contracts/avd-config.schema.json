@@ -1,18 +1,18 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://schemas.example.invalid/avd/config/v1.3.0",
+  "$id": "https://schemas.example.invalid/avd/config/v1.5.0",
   "title": "AVD deployment configuration",
-  "description": "Non-secret customer-scoped input for the V2 AVD CLI. Secret values are never configuration properties. 1.1.0 adds optional host-pool scaling; 1.2.0 adds persona-based workload sizing and shared (pooled) or dedicated (personal) host pools; 1.3.0 adds cloud-only FSLogix (preview), local profiles for dedicated hosts and named user assignments. Earlier versions remain valid.",
+  "description": "Non-secret customer-scoped input for the V2 AVD CLI. Secret values are never configuration properties. 1.1.0 adds optional host-pool scaling; 1.2.0 adds persona-based workload sizing and shared (pooled) or dedicated (personal) host pools; 1.3.0 adds cloud-only FSLogix (preview), local profiles for dedicated hosts and named user assignments; 1.4.0 adds an optional foundation stage that creates the resource group, network, Key Vault and deployment identity; 1.5.0 adds display names users see and FSLogix sign-in protection. Earlier versions remain valid.",
   "type": "object",
   "additionalProperties": false,
   "allOf": [
     {
       "if": { "required": ["scaling"] },
-      "then": { "properties": { "schemaVersion": { "enum": ["1.1.0", "1.2.0", "1.3.0"] } } }
+      "then": { "properties": { "schemaVersion": { "enum": ["1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0"] } } }
     },
     {
       "if": { "anyOf": [{ "required": ["workload"] }, { "required": ["hostPool"] }] },
-      "then": { "properties": { "schemaVersion": { "enum": ["1.2.0", "1.3.0"] } } }
+      "then": { "properties": { "schemaVersion": { "enum": ["1.2.0", "1.3.0", "1.4.0", "1.5.0"] } } }
     },
     {
       "if": {
@@ -21,7 +21,19 @@
           { "properties": { "profile": { "enum": ["AzureFilesEntraKerberosCloudOnly", "LocalProfile"] } } }
         ]
       },
-      "then": { "properties": { "schemaVersion": { "const": "1.3.0" } } }
+      "then": { "properties": { "schemaVersion": { "enum": ["1.3.0", "1.4.0", "1.5.0"] } } }
+    },
+    {
+      "if": { "required": ["foundation"] },
+      "then": { "properties": { "schemaVersion": { "enum": ["1.4.0", "1.5.0"] } } }
+    },
+    {
+      "if": { "anyOf": [{ "required": ["display"] }, { "required": ["fslogix"] }] },
+      "then": { "properties": { "schemaVersion": { "const": "1.5.0" } } }
+    },
+    {
+      "if": { "properties": { "profile": { "const": "LocalProfile" } } },
+      "then": { "not": { "required": ["fslogix"] } }
     },
     {
       "if": { "required": ["workload"] },
@@ -85,7 +97,7 @@
   "properties": {
     "schemaVersion": {
       "type": "string",
-      "enum": ["1.0.0", "1.1.0", "1.2.0", "1.3.0"]
+      "enum": ["1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0"]
     },
     "tenantId": {
       "type": "string",
@@ -128,7 +140,7 @@
     "execution": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["deploymentIdentityClientId", "deploymentIdentityResourceId"],
+      "required": ["deploymentIdentityResourceId"],
       "properties": {
         "deploymentIdentityClientId": {
           "type": "string",
@@ -217,6 +229,82 @@
         "acknowledgePreview": {
           "description": "Required as true for AzureFilesEntraKerberosCloudOnly, which Microsoft documents as preview.",
           "type": "boolean"
+        }
+      }
+    },
+    "display": {
+      "description": "Names users see in Windows App and the web client. Defaults: '<prefix> Workspace' and 'SessionDesktop'.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "workspaceName": {
+          "description": "Workspace friendly name, shown as the heading above the desktop.",
+          "type": "string",
+          "pattern": "^[^\\u0000-\\u001f<>]{1,64}$"
+        },
+        "desktopName": {
+          "description": "Friendly name of the SessionDesktop item (the desktop tile). Deploy sets it after the platform, because ARM cannot.",
+          "type": "string",
+          "pattern": "^[^\\u0000-\\u001f<>]{1,64}$"
+        }
+      }
+    },
+    "fslogix": {
+      "description": "FSLogix options for shared (pooled) hosts.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "preventTempProfile": {
+          "description": "Block sign-in when the profile container cannot attach (PreventLoginWithFailure and PreventLoginWithTempProfile) instead of giving the user a temporary profile whose changes are lost.",
+          "type": "boolean"
+        }
+      }
+    },
+    "foundation": {
+      "description": "Optional resources Deploy creates before the platform (subscription-scope foundation.bicep). Each present member is created and kept; nothing is deleted.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["createResourceGroup"],
+      "properties": {
+        "createResourceGroup": {
+          "description": "Create target.resourceGroupName in target.location if it does not exist.",
+          "type": "boolean"
+        },
+        "network": {
+          "description": "Create a new VNet in the target resource group with session-host and private-endpoint subnets, an NSG and a NAT gateway for explicit outbound access. network.* must name these resources.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["addressSpace"],
+          "properties": {
+            "addressSpace": {
+              "type": "string",
+              "pattern": "^(10\\.(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])\\.(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])\\.0|172\\.(1[6-9]|2[0-9]|3[01])\\.(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])\\.0|192\\.168\\.(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])\\.0)/(1[6-9]|2[0-4])$"
+            }
+          }
+        },
+        "keyVault": {
+          "description": "Create a Key Vault (Azure RBAC) and, if missing, a generated session host admin password secret. sessionHosts.adminPasswordSecretUri must point at this vault.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name"],
+          "properties": {
+            "name": {
+              "type": "string",
+              "pattern": "^[A-Za-z](?!.*--)[A-Za-z0-9-]{1,22}[A-Za-z0-9]$"
+            }
+          }
+        },
+        "deploymentIdentity": {
+          "description": "Create the user-assigned managed identity named by execution.deploymentIdentityResourceId in the target resource group. It receives Key Vault Secrets User on the created vault; broader deployment rights are granted by bootstrap.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name"],
+          "properties": {
+            "name": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{2,127}$"
+            }
+          }
         }
       }
     },

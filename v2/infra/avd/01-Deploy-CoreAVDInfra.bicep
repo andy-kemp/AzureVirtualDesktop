@@ -17,6 +17,8 @@ param hostPoolType string = 'Pooled'
 @minValue(1)
 @maxValue(999)
 param maxSessionLimit int = 5
+@description('Workspace name users see; empty for "<prefix> Workspace".')
+param workspaceFriendlyName string = ''
 @allowed(['BreadthFirst', 'DepthFirst'])
 param loadBalancerType string = 'BreadthFirst'
 @allowed(['Automatic', 'Direct'])
@@ -161,7 +163,7 @@ resource workspace 'Microsoft.DesktopVirtualization/workspaces@2021-07-12' = {
   location: resourceGroup().location
   properties: {
     description: '${defaultPrefix} Workspace'
-    friendlyName: '${defaultPrefix} Workspace'
+    friendlyName: empty(workspaceFriendlyName) ? '${defaultPrefix} Workspace' : workspaceFriendlyName
     applicationGroupReferences: [
       appGroup.id
     ]

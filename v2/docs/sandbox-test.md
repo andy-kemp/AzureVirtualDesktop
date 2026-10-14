@@ -1,6 +1,6 @@
-# Sandbox test runbook: V2 Preview and Deploy
+# Sandbox test runbook: V2 end to end
 
-Status: ready for a first sandbox run. Date: 2026-10-14. Use a **dedicated sandbox subscription**. Deploy creates real, billable resources and changes Entra group membership for dedicated users.
+Status: ready for a first sandbox run. Date: 2026-10-14. Use a **dedicated sandbox subscription**. Deploy creates real, billable resources, including VMs, a NAT gateway and storage. For dedicated users it also changes Entra group membership.
 
 ## 1. Tools (once)
 
@@ -14,87 +14,99 @@ Install-Module Microsoft.Graph.Authentication -Scope CurrentUser   # dedicated u
 
 Restart the terminal after installing Bicep so `bicep` is on `PATH`.
 
-## 2. Sandbox prerequisites
+## 2. What you need
 
-| Item | Notes |
-| --- | --- |
-| Resource group | Create it in the target region first. V2 does not create resource groups. |
-| VNet and two subnets | One for session hosts, one for the storage private endpoint (shared pools). Hosts need outbound internet to reach AVD and the prep script. |
-| Entra groups | An AVD users group and an AVD admins group (different groups). |
-| AVD service principal object ID | `(Get-AzADServicePrincipal -ApplicationId 9cdead84-a844-4324-93f2-b2e6bb768d07).Id` |
-| Key Vault secret | A strong local admin password, e.g. `https://<vault>.vault.azure.net/secrets/avd-admin`. Your account needs *Key Vault Secrets User* on it. |
-| Your Azure rights | Owner on the workload resource group (it creates role assignments), and rights to join the subnets (e.g. Network Contributor on the VNet resource group). |
-| Autoscale (optional) | Assign *Desktop Virtualization Power On Off Contributor* to the AVD service principal at **subscription** scope. Preview warns if missing. |
-| Dedicated users (optional) | You must be able to manage the AVD users group's membership (e.g. group owner). |
+- **Owner** on the sandbox subscription. The script registers resource providers, creates the resource group and makes role assignments.
+- AVD users and admins groups. Either pick existing ones, or let `New` create them (you become owner and can add yourself to the users group). Creating groups needs your tenant to allow users to create security groups, or a Groups Administrator role.
+- Autoscale needs *Desktop Virtualization Power On Off Contributor* for the Azure Virtual Desktop service principal at subscription scope; AVD refuses to create a scaling plan without it. Deploy grants it in the foundation stage, which is why you need Owner.
+- For `-PostDeploy` (step 5), an Entra admin role that can consent to the Graph scopes it requests: Cloud Application Administrator for the storage app, plus Conditional Access Administrator (or Security Administrator) for the Conditional Access exclusion. Global Administrator covers both.
+- The `Microsoft.Graph.Authentication` PowerShell module for the Graph steps.
 
-## 3. Publish the session host prep script
+Everything else is created for you ([ADR 0013](adr/0013-foundation-stage.md)):
 
-Session hosts download the prep script over HTTPS and V2 checks its SHA-256. Commit and push `v2/scripts/session-host-prep.ps1`, then use a URL pinned to that **commit SHA** (not `main`):
+- the resource group;
+- a VNet with subnets, an NSG and a NAT gateway;
+- a Key Vault with a generated admin password;
+- the deployment managed identity;
+- the AVD platform, FSLogix storage (shared pools) and session hosts.
 
-```powershell
-$uri = 'https://raw.githubusercontent.com/andy-kemp/AzureVirtualDesktop/<commit-sha>/v2/scripts/session-host-prep.ps1'
-Invoke-WebRequest $uri -OutFile $env:TEMP\prep.ps1
-(Get-FileHash $env:TEMP\prep.ps1 -Algorithm SHA256).Hash.ToLower()
-```
+## 3. Answer the questions
 
-Hash the **downloaded** file. Git line-ending conversion can make the local copy differ.
-
-## 4. Create your configuration
+**In the browser (recommended):**
 
 ```powershell
 cd C:\GitHub\AzureVirtualDesktop
+.\v2\avd.ps1 -Mode Web
+```
+
+Your browser opens a local wizard (keep the PowerShell window open). Choose from dropdowns, search or create groups, and check the sizing; the page also checks that the VM size is available to your subscription in the region and offers alternatives if not. Select **Create configuration** to write `v2\sandbox\avd.json`, then **Run Preview** to run step 4 in the page. When Preview has no blockers the page shows the Deploy command to copy. Select **Close the wizard** when you're done.
+
+**Or in the terminal:**
+
+```powershell
 .\v2\avd.ps1 -Mode New -OutputFile .\v2\sandbox\avd.json
 ```
 
-Answer the questions, then edit `v2\sandbox\avd.json` and replace every example value with your sandbox details:
+You'll be asked to sign in, then:
 
-- `tenantId`, `subscriptionId`
-- `target` (resource group, region, prefix)
-- `network`
-- `identity.avdServicePrincipalObjectId`
-- `accessGroups`
-- `storage.accountName` (globally unique)
-- `sessionHosts.adminPasswordSecretUri`
-- `artifacts` (URI and SHA-256 from step 3)
+1. Subscription.
+2. Region.
+3. Prefix (for example `AVD`).
+4. Resource group (default `rg-<prefix>-avd`).
+5. **New VNet** (recommended) or existing. A non-overlapping range is proposed.
+6. Users and admins groups: pick existing groups by name, or create new ones.
+7. Shared or dedicated, persona, user count and peak concurrency.
+8. For shared pools, hybrid or cloud-only identities. Hybrid also asks for your AD domain name and GUID.
+9. Business-hours scaling or always available.
+10. The workspace and desktop names users see (defaults "<prefix> Workspace" and "<prefix> Virtual Desktop").
+11. For shared pools, what happens if a profile can't load: a temporary profile (easier while piloting) or a blocked sign-in (recommended for production).
 
-`execution` must name a user-assigned managed identity in the same subscription. It's recorded for the managed-identity deployment path, but a local `-AsSignedInUser` run doesn't use it.
+The file is written to `v2\sandbox\`, which `v2/.gitignore` keeps out of source control.
 
-```powershell
-.\v2\avd.ps1 -Mode Validate -ConfigurationFile .\v2\sandbox\avd.json
-```
-
-`v2/.gitignore` keeps `v2\sandbox\` and plan files out of source control because they contain real IDs.
-
-## 5. Preview (read-only)
+## 4. Preview (no changes)
 
 ```powershell
 .\v2\avd.ps1 -Mode Preview -ConfigurationFile .\v2\sandbox\avd.json
 ```
 
-Preview signs in to the configured tenant and subscription if needed, checks the resource group, VNet, subnets, prep script digest and autoscale role, and runs Azure what-if. It writes `v2\sandbox\avd.plan.json`, valid for 24 hours. On a first run only the platform can be previewed, because the host pool doesn't exist yet. Fix any **BLOCKED** items and preview again.
+Preview shows the what-if for the foundation and lists blockers and warnings, then writes a plan valid for 24 hours. On a brand-new estate the platform and hosts can't be previewed until the foundation exists; Deploy runs the stages in order.
 
-## 6. Deploy
+Preview also checks compute capacity in the region. If the VM size isn't offered to your subscription, or the family or regional vCPU quota can't hold every host, that's a blocker and Preview shows the numbers (for example, 2 × Standard_D8s_v5 needs 16 standardDSv5Family vCPUs). To fix it, request a quota increase (portal → Quotas → Compute) or edit `vmSize` or `count` in the configuration. Check usage yourself with `Get-AzVMUsage -Location uksouth`.
+
+## 5. Deploy
 
 ```powershell
-.\v2\avd.ps1 -Mode Deploy -ConfigurationFile .\v2\sandbox\avd.json -AsSignedInUser
+.\v2\avd.ps1 -Mode Deploy -ConfigurationFile .\v2\sandbox\avd.json -AsSignedInUser -PostDeploy
 ```
 
-Type the resource group name to approve. Deploy refuses the plan if it has blockers, is older than 24 hours, or the configuration or templates changed since Preview.
+Type the resource group name to approve. Deploy then runs these steps:
 
-The order matches the root runner:
+1. Register any missing resource providers.
+2. **Foundation:** only what is missing among the resource group, network with NAT, Key Vault with a generated password (never shown, never rotated) and managed identity. Reruns skip it once everything exists, so changes you make to those resources are kept.
+3. **Platform:** host pool, app group, workspace (with your workspace name), FSLogix storage with private endpoint and DNS, scaling plan, and role assignments. Then the desktop tile is renamed to your desktop name.
+4. **Session host validation:** Azure validates the host deployment with a placeholder token before a real one exists. Failures show the nested Azure error codes (such as `QuotaExceeded` or `SkuNotAvailable`) rather than a generic preflight message.
+5. **Registration token:** a 4-hour token, used by the session hosts, then always revoked.
+6. **Session hosts:** deployed with the token, then registration is checked for up to 10 minutes. New shared-pool hosts are then restarted once so their Microsoft Entra Kerberos setting applies.
+7. **Dedicated pools only:** assign hosts to named users and add them to the users group with your delegated Graph permission.
+8. **Post-deployment configuration (`-PostDeploy`, [ADR 0015](adr/0015-post-deploy-configuration.md)):** signs in to Microsoft Graph and:
+   - enables Microsoft Entra authentication for RDP for the tenant (needed for the hosts' single sign-on);
+   - grants admin consent to the storage account's Entra app, adds the cloud-group tag (cloud-only) and the `privatelink` identifier URIs;
+   - lists the Conditional Access policies that require MFA for all resources and, **after you type `yes`**, excludes only the storage app from them. Microsoft-managed policies can't be changed and are listed instead, as are policies with device or privileged-role conditions you should review;
+   - sets FSLogix's recommended folder permissions on the profile share. The storage firewall is opened to **your public IP only** for a minute or two, with a temporary data role, then closed again and the role removed, even if something fails;
+   - checks each host is Entra joined and Intune managed, and runs a new enough Windows build.
+9. **Manual tasks:** whatever couldn't be done automatically, plus a sign-in test.
 
-1. Read the admin password from Key Vault.
-2. Deploy the platform.
-3. Create a 4-hour registration token.
-4. Deploy the session hosts.
-5. **Always** revoke the token.
-6. Wait up to 10 minutes for host registration.
+Without `-PostDeploy`, step 8 is listed as manual tasks. You can run it any time later, including on an estate deployed before this option existed:
 
-For dedicated pools it then sets each host's assigned user and adds the users to the AVD users group with your delegated Graph permission. It signs you in to Graph if needed.
+```powershell
+.\v2\avd.ps1 -Mode PostDeploy -ConfigurationFile .\v2\sandbox\avd.json
+```
 
-Deploy finishes with a list of manual tasks, such as Azure Files consent, the MFA exclusion for the storage app, ACLs, the autoscale role, and a test sign-in.
+Use `-ConditionalAccess Report` to only list the Conditional Access changes, or `-OperatorPublicIp <ip>` if your public IP can't be detected (it's looked up with api.ipify.org).
 
-## 7. Try expansion
+Run Preview again before every Deploy, because each plan is bound to the configuration it was made from.
+
+## 6. Try expansion
 
 ```powershell
 .\v2\avd.ps1 -Mode Expand  -ConfigurationFile .\v2\sandbox\avd.json -AddHosts 1                     # shared pools
@@ -103,11 +115,17 @@ Deploy finishes with a list of manual tasks, such as Azure Files consent, the MF
 .\v2\avd.ps1 -Mode Deploy  -ConfigurationFile .\v2\sandbox\avd.json -AsSignedInUser
 ```
 
-## 8. Verify and clean up
+## 7. Verify and clean up
 
-- Sign in as a test user at <https://windows.cloud.microsoft> or with the Windows App. Check the desktop launches, the profile persists (shared pools) and scaling behaves as expected.
-- Clean up by deleting the sandbox resource group. V2 never deletes resources. Remove test users from the AVD users group yourself.
+- Sign in as an **ordinary (non-admin) test user** from the AVD users group at <https://windows.cloud.microsoft> or with the Windows App. Admin accounts are often caught by privileged-access Conditional Access policies that block the storage sign-in from a session host. Check the desktop launches, the profile persists (shared pools) and scaling behaves as expected.
+- In the session, `klist get cifs/<storage-account>.file.core.windows.net` should return a ticket and `\\<storage-account>.file.core.windows.net\profiles` should contain a `<user>_<SID>` folder with a VHDX. If the profile doesn't mount, open the storage app's entry in Entra ID sign-in logs and check its Conditional Access tab.
+- To clean up, delete the resource group; V2 never deletes resources. The Key Vault stays soft-deleted for 7 days. Purge it (`Remove-AzKeyVault -VaultName <name> -Location <region> -InRemovedState`) before reusing the same prefix and resource group, or Preview will block. Remove test users from the AVD users group yourself.
+- Deleting the resource group leaves the hosts' Entra and Intune device records, and the storage app's Conditional Access exclusions. Delete stale devices before redeploying with the same host names (PostDeploy reports duplicates).
+
+## Without discovery
+
+`-Offline` keeps the old behaviour: answers are applied to a base configuration that you edit by hand. Existing-network mode expects the VNet to have outbound internet access already.
 
 ## What to report back
 
-The Preview and Deploy output (it never prints secrets or tokens), any failing step, and the manual tasks list. Known untested areas are flagged in ADR 0009 (personal scaling plan type) and ADR 0011 (cloud-only preview ACLs).
+Send the New, Preview and Deploy output (it never prints secrets or tokens), any failing step, and the manual tasks list. Known untested areas: the personal scaling plan type (ADR 0009), the PostDeploy folder-permission step against a live storage account (ADR 0015) and Key Vault role propagation timing on reruns (ADR 0013).

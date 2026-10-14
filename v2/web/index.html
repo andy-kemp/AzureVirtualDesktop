@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AVD deployment wizard</title>
+<style>
+  :root { --accent: #0f6cbd; --bg: #f5f7fa; --card: #fff; --text: #1b1b1b; --muted: #5c6670; --warn: #8a5a00; --warn-bg: #fff4ce; --err: #a4262c; --ok: #107c10; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Segoe UI", system-ui, sans-serif; background: var(--bg); color: var(--text); }
+  header { background: var(--accent); color: #fff; padding: 14px 24px; display: flex; justify-content: space-between; align-items: center; }
+  header h1 { font-size: 18px; margin: 0; font-weight: 600; }
+  header .who { font-size: 13px; opacity: .9; }
+  main { max-width: 920px; margin: 20px auto 60px; padding: 0 16px; }
+  section { background: var(--card); border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.08); padding: 18px 22px; margin-bottom: 16px; }
+  section h2 { font-size: 16px; margin: 0 0 12px; display: flex; align-items: center; gap: 8px; }
+  section h2 .n { background: var(--accent); color: #fff; border-radius: 50%; width: 24px; height: 24px; font-size: 13px; display: inline-flex; align-items: center; justify-content: center; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 18px; }
+  .full { grid-column: 1 / -1; }
+  label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 3px; }
+  input[type=text], input[type=number], select { width: 100%; padding: 7px 9px; border: 1px solid #c8ced6; border-radius: 4px; font: inherit; background: #fff; }
+  input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 0; }
+  .choices { display: flex; gap: 10px; flex-wrap: wrap; }
+  .choice { border: 1px solid #c8ced6; border-radius: 6px; padding: 9px 12px; cursor: pointer; flex: 1 1 200px; font-size: 13px; }
+  .choice input { margin-right: 6px; }
+  .choice.selected { border-color: var(--accent); background: #eef5fc; }
+  .choice small { display: block; color: var(--muted); font-weight: normal; margin-top: 3px; }
+  button { background: var(--accent); color: #fff; border: 0; border-radius: 4px; padding: 9px 16px; font: inherit; font-weight: 600; cursor: pointer; }
+  button.secondary { background: #fff; color: var(--accent); border: 1px solid var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  .note { font-size: 13px; padding: 8px 10px; border-radius: 4px; margin-top: 8px; }
+  .note.warn { background: var(--warn-bg); color: var(--warn); }
+  .note.err { background: #fde7e9; color: var(--err); }
+  .note.ok { background: #dff6dd; color: var(--ok); }
+  .hidden { display: none !important; }
+  pre { background: #1e1e1e; color: #e6e6e6; padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 12px; white-space: pre-wrap; }
+  .sizing { font-size: 13px; background: #eef5fc; border-radius: 6px; padding: 10px 12px; margin-top: 10px; }
+  .sizing ul { margin: 4px 0 0 18px; padding: 0; }
+  .actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .cmd { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+  .cmd code { flex: 1; background: #f0f0f0; padding: 6px 8px; border-radius: 4px; font-size: 12px; overflow-x: auto; white-space: nowrap; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Azure Virtual Desktop deployment wizard</h1>
+  <div class="who" id="who">Connecting...</div>
+</header>
+<main>
+  <div id="globalError" class="note err hidden"></div>
+
+  <section>
+    <h2><span class="n">1</span>Azure location</h2>
+    <div class="grid">
+      <div><label for="subscription">Subscription</label><select id="subscription"></select></div>
+      <div><label for="region">Region</label><select id="region"><option value="">Choose a subscription first</option></select><div class="hint">Regions that support AVD host pools.</div></div>
+      <div><label for="prefix">Name prefix</label><input id="prefix" type="text" value="AVD" maxlength="10"><div class="hint">Letters, digits, hyphens; max 10. Used in resource names.</div></div>
+      <div><label for="rg">Resource group</label><input id="rg" type="text"><div class="hint" id="rgStatus"></div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="n">2</span>Network</h2>
+    <div class="choices" id="networkMode">
+      <label class="choice selected"><input type="radio" name="networkMode" value="New" checked>Create a new VNet<small>With NAT gateway for outbound access. Recommended for a new environment.</small></label>
+      <label class="choice"><input type="radio" name="networkMode" value="Existing">Use an existing VNet<small>Must be in the chosen region and have outbound internet access.</small></label>
+    </div>
+    <div id="newNetwork" class="grid" style="margin-top:12px">
+      <div><label for="addressSpace">Address space</label><input id="addressSpace" type="text"><div class="hint">/16 to /24 private range. Session hosts use the first /25, the storage private endpoint a /27.</div></div>
+      <div id="overlap"></div>
+    </div>
+    <div id="existingNetwork" class="grid hidden" style="margin-top:12px">
+      <div class="full"><label for="vnet">Virtual network</label><select id="vnet"></select></div>
+      <div><label for="hostSubnet">Session host subnet</label><select id="hostSubnet"></select></div>
+      <div><label for="peSubnet">Private endpoint subnet</label><select id="peSubnet"></select></div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="n">3</span>Access groups</h2>
+    <div class="grid">
+      <div id="usersGroupBox"></div>
+      <div id="adminsGroupBox"></div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="n">4</span>Users and sizing</h2>
+    <div class="choices" id="hosting">
+      <label class="choice selected"><input type="radio" name="hosting" value="Shared" checked>Shared platform<small>Users share multi-session hosts (pooled). Profiles roam with FSLogix.</small></label>
+      <label class="choice"><input type="radio" name="hosting" value="Dedicated">Dedicated session hosts<small>Each user gets their own VM (personal). Profile stays on the VM.</small></label>
+    </div>
+    <div class="grid" style="margin-top:12px">
+      <div class="full"><label for="persona">Persona</label><select id="persona"></select><div class="hint" id="personaHint"></div></div>
+      <div><label for="users">Number of users</label><input id="users" type="number" min="1" max="5000" value="10"></div>
+      <div id="peakBox"><label for="peak">Peak concurrency (%)</label><input id="peak" type="number" min="1" max="100" value="100"><div class="hint">Share of users signed in at the same time.</div></div>
+    </div>
+    <div class="sizing" id="sizing">Calculating...</div>
+    <div id="capacity"></div>
+    <div id="vmSizeBox" class="hidden" style="margin-top:10px"><label for="vmSize">VM size to use instead</label><select id="vmSize"></select><div class="hint">Same vCPU count as the recommendation, available to this subscription in the region, with enough quota for every host.</div></div>
+  </section>
+
+  <section id="profileSection">
+    <h2><span class="n">5</span>User profiles (FSLogix)</h2>
+    <div class="choices" id="identity">
+      <label class="choice selected"><input type="radio" name="identity" value="CloudOnly" checked>Cloud-only identities<small>Microsoft Entra ID only. Microsoft preview with extra admin prerequisites.</small></label>
+      <label class="choice"><input type="radio" name="identity" value="Hybrid">Hybrid identities<small>Synced from on-premises Active Directory. Generally available.</small></label>
+    </div>
+    <div id="hybridBox" class="grid hidden" style="margin-top:12px">
+      <div><label for="domainName">AD domain name</label><input id="domainName" type="text" placeholder="corp.contoso.com"><div class="hint">Get-ADDomain DNSRoot</div></div>
+      <div><label for="domainGuid">AD domain GUID</label><input id="domainGuid" type="text" placeholder="00000000-0000-0000-0000-000000000000"><div class="hint">Get-ADDomain ObjectGUID</div></div>
+    </div>
+    <div id="cloudOnlyNote" class="note warn">Cloud-only FSLogix is a Microsoft preview. Its Entra prerequisites (admin consent, the cloud group SID tag, private-link names, the MFA Conditional Access exclusion and folder permissions) are applied by Deploy with -PostDeploy.</div>
+    <label style="margin-top:12px">If a user's profile cannot load</label>
+    <div class="choices" id="profileFailure">
+      <label class="choice selected"><input type="radio" name="profileFailure" value="TempProfile" checked>Use a temporary profile<small>The user can work, but changes are lost at sign-out. Easier while piloting.</small></label>
+      <label class="choice"><input type="radio" name="profileFailure" value="Block">Block the sign-in<small>The problem is visible straight away and no work is lost. Recommended for production.</small></label>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="n">6</span>Scaling</h2>
+    <div class="choices" id="scaling">
+      <label class="choice selected"><input type="radio" name="scaling" value="BusinessHours" checked>Business hours<small>One host always on, spare host ready while people work, scale down when quiet.</small></label>
+      <label class="choice"><input type="radio" name="scaling" value="None">Always available<small>No scaling plan; all hosts stay running.</small></label>
+    </div>
+    <div id="scheduleBox" class="grid" style="margin-top:12px">
+      <div class="full"><label for="timeZone">Time zone</label><select id="timeZone"></select></div>
+      <div><label for="dayStart">Working day starts</label><select id="dayStart"></select></div>
+      <div><label for="dayEnd">Working day ends</label><select id="dayEnd"></select></div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="n">7</span>What users see</h2>
+    <div class="grid">
+      <div><label for="workspaceName">Workspace name</label><input id="workspaceName" type="text" maxlength="64"><div class="hint">The heading in Windows App and the web client.</div></div>
+      <div><label for="desktopName">Desktop name</label><input id="desktopName" type="text" maxlength="64"><div class="hint">The desktop tile users select (Azure's default is "SessionDesktop").</div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="n">8</span>Create configuration</h2>
+    <div class="hint" id="outputInfo"></div>
+    <label id="overwriteBox" class="hidden" style="font-weight:normal;margin-top:8px"><input type="checkbox" id="overwrite"> Overwrite the existing configuration file</label>
+    <div id="validation" class="note err hidden"></div>
+    <div class="actions" style="margin-top:12px">
+      <button id="generate">Create configuration</button>
+      <span id="busy" class="hint hidden">Working... creating groups and checking names can take a moment.</span>
+    </div>
+    <div id="result" class="hidden">
+      <div class="note ok">Configuration created. Nothing has been deployed yet.</div>
+      <pre id="summary"></pre>
+      <div class="actions" style="margin-top:12px">
+        <button id="preview">Run Preview</button>
+        <span id="previewBusy" class="hint hidden">Previewing in Azure (what-if, names, quota)... this can take a minute or two. No changes are made.</span>
+      </div>
+      <div id="previewResult" class="hidden" style="margin-top:12px">
+        <div id="previewStatus" class="note"></div>
+        <div id="previewBlockers"></div>
+        <div id="previewWarnings"></div>
+        <pre id="previewChanges"></pre>
+      </div>
+      <label style="margin-top:14px">Commands (run in PowerShell 7 from the repository folder)</label>
+      <div id="nextSteps"></div>
+      <div class="actions" style="margin-top:14px"><button class="secondary" id="finish">Close the wizard</button></div>
+    </div>
+  </section>
+</main>
+<script>
+(() => {
+  'use strict';
+  const token = new URLSearchParams(location.search).get('token') || '';
+  history.replaceState(null, '', '/');
+  const $ = id => document.getElementById(id);
+  const state = { personas: [], networks: [], existingPrefixes: [], rgEdited: false, groupNamesEdited: { users: false, admins: false }, displayEdited: { workspaceName: false, desktopName: false }, recommendation: null, capacityBlocked: false, capacityKey: '' };
+
+  async function api(path, body) {
+    const options = { method: body === undefined ? 'GET' : 'POST', headers: { 'X-AVD-Token': token } };
+    if (body !== undefined) { options.headers['Content-Type'] = 'application/json'; options.body = JSON.stringify(body); }
+    const response = await fetch(path, options);
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || response.statusText);
+    return data;
+  }
+  const asArray = v => Array.isArray(v) ? v : (v ? [v] : []);
+  function fill(select, items, value, label, selected, placeholder) {
+    select.replaceChildren();
+    if (placeholder) select.append(new Option(placeholder, ''));
+    for (const item of items) select.append(new Option(label(item), value(item)));
+    if (selected !== undefined && [...select.options].some(o => o.value === selected)) select.value = selected;
+  }
+  function showError(message) { const e = $('globalError'); e.textContent = message; e.classList.toggle('hidden', !message); }
+  function radioValue(name) { return document.querySelector(`input[name=${name}]:checked`).value; }
+  function wireChoices(containerId, onChange) {
+    $(containerId).addEventListener('change', () => {
+      for (const c of $(containerId).querySelectorAll('.choice')) c.classList.toggle('selected', c.querySelector('input').checked);
+      onChange();
+    });
+  }
+  const cleanPrefix = () => $('prefix').value.replace(/[^A-Za-z0-9]/g, '').toLowerCase();
+  function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
+
+  function cidrRange(cidr) {
+    const m = /^(\d+)\.(\d+)\.(\d+)\.(\d+)\/(\d+)$/.exec(cidr.trim());
+    if (!m) return null;
+    const ip = ((+m[1] << 24) >>> 0) + (+m[2] << 16) + (+m[3] << 8) + +m[4];
+    const size = 2 ** (32 - +m[5]);
+    return { start: ip, end: ip + size - 1, aligned: ip % size === 0, bits: +m[5] };
+  }
+  function checkOverlap() {
+    const box = $('overlap'); box.replaceChildren();
+    const r = cidrRange($('addressSpace').value);
+    const note = document.createElement('div'); note.className = 'note';
+    if (!r || r.bits < 16 || r.bits > 24) { note.classList.add('err'); note.textContent = 'Enter a range from /16 to /24, for example 10.200.0.0/24.'; box.append(note); return; }
+    if (!r.aligned) { note.classList.add('err'); note.textContent = 'Not a network boundary for this prefix length (for example use 10.200.0.0/16, not 10.200.1.0/16).'; box.append(note); return; }
+    const clashes = state.existingPrefixes.filter(p => { const o = cidrRange(p); return o && r.start <= o.end && o.start <= r.end; });
+    if (clashes.length) { note.classList.add('warn'); note.textContent = `Overlaps ${clashes.join(', ')}. That only matters if the networks will ever be connected.`; box.append(note); }
+  }
+
+  function groupBox(role) {
+    const box = $(role + 'GroupBox');
+    box.replaceChildren();
+    const heading = document.createElement('label'); heading.textContent = role === 'users' ? 'AVD users group' : 'AVD admins group';
+    const choices = document.createElement('div'); choices.className = 'choices'; choices.id = role + 'Mode';
+    for (const [value, text, sub] of [['new', 'Create new', 'Security group; you become owner'], ['existing', 'Use existing', 'Search Entra by name']]) {
+      const l = document.createElement('label'); l.className = 'choice' + (value === 'new' ? ' selected' : '');
+      const i = document.createElement('input'); i.type = 'radio'; i.name = role + 'Mode'; i.value = value; i.checked = value === 'new';
+      const s = document.createElement('small'); s.textContent = sub;
+      l.append(i, text, s); choices.append(l);
+    }
+    const newPart = document.createElement('div'); newPart.style.marginTop = '8px';
+    const nameInput = document.createElement('input'); nameInput.type = 'text'; nameInput.id = role + 'NewName';
+    nameInput.addEventListener('input', () => { state.groupNamesEdited[role] = true; });
+    newPart.append(nameInput);
+    if (role === 'users') {
+      const l = document.createElement('label'); l.style.fontWeight = 'normal'; l.style.marginTop = '6px';
+      const c = document.createElement('input'); c.type = 'checkbox'; c.id = 'addMe'; c.checked = true;
+      l.append(c, ' Add me to this group so I can test sign-in'); newPart.append(l);
+    }
+    const existingPart = document.createElement('div'); existingPart.className = 'hidden'; existingPart.style.marginTop = '8px';
+    const search = document.createElement('input'); search.type = 'text'; search.placeholder = 'Type to search groups'; search.id = role + 'Search';
+    const select = document.createElement('select'); select.id = role + 'Select'; select.style.marginTop = '6px'; select.size = 5;
+    search.addEventListener('input', debounce(() => loadGroups(role), 350));
+    existingPart.append(search, select);
+    box.append(heading, choices, newPart, existingPart);
+    wireChoices(role + 'Mode', () => {
+      const existing = radioValue(role + 'Mode') === 'existing';
+      newPart.classList.toggle('hidden', existing); existingPart.classList.toggle('hidden', !existing);
+      if (existing && !select.options.length) loadGroups(role);
+    });
+  }
+  async function loadGroups(role) {
+    const select = $(role + 'Select');
+    try {
+      const groups = asArray(await api('/api/groups?search=' + encodeURIComponent($(role + 'Search').value.trim())));
+      fill(select, groups, g => g.id, g => g.displayName, undefined);
+      if (!groups.length) select.append(new Option('No matching groups', ''));
+    } catch (e) { showError(e.message); }
+  }
+  function syncDefaults() {
+    const p = cleanPrefix();
+    const label = $('prefix').value.trim();
+    if (!state.rgEdited) { $('rg').value = p ? `rg-${p}-avd` : ''; checkResourceGroup(); }
+    for (const role of ['users', 'admins']) if (!state.groupNamesEdited[role]) $(role + 'NewName').value = p ? `sg-${p}-avd-${role}` : '';
+    if (!state.displayEdited.workspaceName) $('workspaceName').value = label ? `${label} Workspace` : '';
+    if (!state.displayEdited.desktopName) $('desktopName').value = label ? `${label} Virtual Desktop` : '';
+  }
+  const checkResourceGroup = debounce(async () => {
+    const name = $('rg').value.trim(); const status = $('rgStatus');
+    if (!name) { status.textContent = ''; return; }
+    try {
+      const rg = await api('/api/resourcegroup?name=' + encodeURIComponent(name));
+      const clash = rg.exists && rg.location !== $('region').value;
+      status.textContent = rg.exists ? `Exists in ${rg.location}${clash ? ' - choose that region or another name' : ''}.` : 'Will be created.';
+      status.style.color = clash ? 'var(--err)' : '';
+    } catch (e) { status.textContent = e.message; }
+  }, 400);
+
+  async function onSubscription() {
+    showError('');
+    try {
+      await api('/api/subscription', { id: $('subscription').value });
+      const regions = asArray(await api('/api/regions'));
+      fill($('region'), regions, r => r.name, r => `${r.displayName} (${r.name})`, regions.some(r => r.name === 'uksouth') ? 'uksouth' : undefined);
+      await onRegion();
+    } catch (e) { showError(e.message); }
+  }
+  async function onRegion() {
+    const region = $('region').value;
+    try {
+      const [networks, zones] = await Promise.all([api('/api/networks?region=' + encodeURIComponent(region)), api('/api/timezones?region=' + encodeURIComponent(region))]);
+      state.networks = asArray(networks.networks); state.existingPrefixes = asArray(networks.existingPrefixes);
+      if (!$('addressSpace').dataset.edited) $('addressSpace').value = networks.proposedAddressSpace;
+      checkOverlap();
+      fill($('vnet'), state.networks, n => n.name, n => `${n.name} (${n.resourceGroup}, ${asArray(n.addressPrefixes).join(', ')})`, undefined, state.networks.length ? undefined : 'No VNets in this region');
+      onVnet();
+      const zoneList = asArray(zones.zones);
+      const suggested = zoneList.find(z => z.id === zones.suggested);
+      fill($('timeZone'), suggested ? [suggested, ...zoneList.filter(z => z !== suggested)] : zoneList, z => z.id, z => z.displayName, zones.suggested);
+      checkResourceGroup();
+      checkCapacity();
+    } catch (e) { showError(e.message); }
+  }
+  function onVnet() {
+    const vnet = state.networks.find(n => n.name === $('vnet').value);
+    const subnets = vnet ? asArray(vnet.subnets) : [];
+    fill($('hostSubnet'), subnets, s => s, s => s, undefined);
+    fill($('peSubnet'), subnets, s => s, s => s, subnets[1]);
+  }
+  const updateSizing = debounce(async () => {
+    const box = $('sizing'); box.replaceChildren();
+    try {
+      const rec = await api('/api/sizing', { hosting: radioValue('hosting'), persona: $('persona').value, users: +$('users').value, peakConcurrencyPct: +$('peak').value });
+      const strong = document.createElement('strong');
+      strong.textContent = `Recommendation: ${rec.sessionHosts.count} x ${rec.sessionHosts.vmSize}` + (rec.hostPool.maxSessionLimit ? `, up to ${rec.hostPool.maxSessionLimit} sessions per host` : ', one VM per user');
+      const list = document.createElement('ul');
+      for (const line of asArray(rec.explanation)) { const li = document.createElement('li'); li.textContent = line; list.append(li); }
+      box.append(strong, list);
+      state.recommendation = rec;
+      checkCapacity();
+    } catch (e) { box.textContent = e.message; }
+  }, 300);
+  async function checkCapacity() {
+    const box = $('capacity'); const rec = state.recommendation; const region = $('region').value;
+    state.capacityBlocked = false;
+    if (!rec || !region) { box.replaceChildren(); return; }
+    const key = `${region}|${rec.sessionHosts.vmSize}|${rec.sessionHosts.count}`;
+    state.capacityKey = key;
+    const note = document.createElement('div'); note.className = 'note'; note.textContent = `Checking ${rec.sessionHosts.vmSize} availability in ${region}...`;
+    box.replaceChildren(note);
+    try {
+      const result = await api('/api/capacity', { location: region, vmSize: rec.sessionHosts.vmSize, count: rec.sessionHosts.count });
+      if (state.capacityKey !== key) return;
+      const alternatives = asArray(result.alternatives);
+      if (!result.checked) {
+        note.classList.add('warn'); note.textContent = asArray(result.warnings).join(' ') || 'Could not check VM availability; Preview will check it again.';
+        $('vmSizeBox').classList.add('hidden');
+      } else if (result.ok) {
+        note.classList.add('ok'); note.textContent = `${rec.sessionHosts.vmSize} is available to this subscription in ${region} with enough vCPU quota for ${rec.sessionHosts.count} host(s).`;
+        $('vmSizeBox').classList.add('hidden');
+      } else {
+        note.classList.add(alternatives.length ? 'warn' : 'err');
+        note.textContent = asArray(result.blockers).join(' ');
+        state.capacityBlocked = !alternatives.length;
+        fill($('vmSize'), alternatives, s => s, s => s, alternatives[0]);
+        $('vmSizeBox').classList.toggle('hidden', !alternatives.length);
+      }
+    } catch (e) { if (state.capacityKey === key) { note.classList.add('warn'); note.textContent = e.message; } }
+  }
+  function onHosting() {
+    const shared = radioValue('hosting') === 'Shared';
+    $('peakBox').classList.toggle('hidden', !shared);
+    $('profileSection').classList.toggle('hidden', !shared);
+    updateSizing();
+  }
+  function onIdentity() {
+    const hybrid = radioValue('identity') === 'Hybrid';
+    $('hybridBox').classList.toggle('hidden', !hybrid); $('cloudOnlyNote').classList.toggle('hidden', hybrid);
+  }
+
+  function collect() {
+    const errors = [];
+    const answers = {
+      SubscriptionId: $('subscription').value, Location: $('region').value, Prefix: $('prefix').value.trim(), ResourceGroupName: $('rg').value.trim(),
+      NetworkMode: radioValue('networkMode'), Hosting: radioValue('hosting'), Persona: $('persona').value,
+      Users: +$('users').value, PeakConcurrencyPct: +$('peak').value, ScalingPreset: radioValue('scaling'), Overwrite: $('overwrite').checked
+    };
+    if (!/^[A-Za-z][A-Za-z0-9-]{0,9}$/.test(answers.Prefix)) errors.push('Prefix: start with a letter; letters, digits and hyphens; max 10.');
+    if (!answers.ResourceGroupName) errors.push('Resource group is required.');
+    if (!answers.Location) errors.push('Choose a region.');
+    if (answers.NetworkMode === 'New') {
+      answers.AddressSpace = $('addressSpace').value.trim();
+      const r = cidrRange(answers.AddressSpace);
+      if (!r || !r.aligned || r.bits < 16 || r.bits > 24) errors.push('Address space must be an aligned /16 to /24 range.');
+    } else {
+      answers.VirtualNetworkName = $('vnet').value; answers.SessionHostSubnet = $('hostSubnet').value; answers.PrivateEndpointSubnet = $('peSubnet').value;
+      if (!answers.VirtualNetworkName || !answers.SessionHostSubnet || !answers.PrivateEndpointSubnet) errors.push('Choose a VNet and both subnets.');
+    }
+    for (const role of ['users', 'admins']) {
+      const key = role === 'users' ? 'Users' : 'Admins';
+      if (radioValue(role + 'Mode') === 'new') {
+        answers['New' + key + 'Group'] = $(role + 'NewName').value.trim();
+        if (!answers['New' + key + 'Group']) errors.push(`Enter a name for the new ${role} group.`);
+      } else {
+        answers[key + 'Group'] = $(role + 'Select').value;
+        if (!answers[key + 'Group']) errors.push(`Choose an existing ${role} group.`);
+      }
+    }
+    if ((answers.UsersGroup && answers.UsersGroup === answers.AdminsGroup) || (answers.NewUsersGroup && answers.NewUsersGroup === answers.NewAdminsGroup)) errors.push('The users and admins groups must be different.');
+    answers.AddMeToUsersGroup = radioValue('usersMode') === 'new' && $('addMe').checked;
+    if (!(answers.Users >= 1 && answers.Users <= 5000)) errors.push('Users must be 1 to 5000.');
+    if (!$('vmSizeBox').classList.contains('hidden') && $('vmSize').value) answers.VmSize = $('vmSize').value;
+    if (state.capacityBlocked) errors.push('The recommended VM size is not available in this region and there is no alternative with quota. Choose another region or request access/quota.');
+    if (answers.Hosting === 'Shared') {
+      if (!(answers.PeakConcurrencyPct >= 1 && answers.PeakConcurrencyPct <= 100)) errors.push('Peak concurrency must be 1 to 100%.');
+      answers.UserIdentity = radioValue('identity');
+      if (answers.UserIdentity === 'Hybrid') {
+        answers.KerberosDomainName = $('domainName').value.trim(); answers.KerberosDomainGuid = $('domainGuid').value.trim();
+        if (!/^([A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$/.test(answers.KerberosDomainName)) errors.push('Enter the AD domain name.');
+        if (!/^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$/.test(answers.KerberosDomainGuid)) errors.push('Enter the AD domain GUID.');
+      }
+    }
+    if (answers.ScalingPreset === 'BusinessHours') {
+      answers.TimeZone = $('timeZone').value; answers.WorkdayStart = $('dayStart').value; answers.WorkdayEnd = $('dayEnd').value;
+      if (answers.WorkdayEnd <= answers.WorkdayStart) errors.push('The working day must end after it starts.');
+    }
+    answers.WorkspaceName = $('workspaceName').value.trim(); answers.DesktopName = $('desktopName').value.trim();
+    for (const [label, value] of [['Workspace name', answers.WorkspaceName], ['Desktop name', answers.DesktopName]]) {
+      if (!/^[^\x00-\x1f<>]{1,64}$/.test(value)) errors.push(`${label}: 1-64 characters, no < or >.`);
+    }
+    if (answers.Hosting === 'Shared') answers.ProfileFailureAction = radioValue('profileFailure');
+    return { answers, errors };
+  }
+
+  async function generate() {
+    const { answers, errors } = collect();
+    const v = $('validation'); v.textContent = errors.join(' '); v.classList.toggle('hidden', !errors.length);
+    if (errors.length) return;
+    $('generate').disabled = true; $('busy').classList.remove('hidden'); showError('');
+    try {
+      const result = await api('/api/generate', answers);
+      $('summary').textContent = [...asArray(result.log), '', ...asArray(result.summary)].join('\n').trim();
+      const next = $('nextSteps'); next.replaceChildren();
+      for (const command of asArray(result.next)) next.append(commandRow(command));
+      $('previewResult').classList.add('hidden');
+      $('result').classList.remove('hidden');
+      $('overwriteBox').classList.remove('hidden'); $('overwrite').checked = false;
+      $('result').scrollIntoView({ behavior: 'smooth' });
+    } catch (e) {
+      v.textContent = e.message; v.classList.remove('hidden');
+    } finally {
+      $('generate').disabled = false; $('busy').classList.add('hidden');
+    }
+  }
+
+  function commandRow(command) {
+    const row = document.createElement('div'); row.className = 'cmd';
+    const code = document.createElement('code'); code.textContent = command;
+    const copy = document.createElement('button'); copy.className = 'secondary'; copy.textContent = 'Copy';
+    copy.addEventListener('click', () => navigator.clipboard.writeText(command).then(() => { copy.textContent = 'Copied'; }));
+    row.append(code, copy);
+    return row;
+  }
+  function noteList(container, cls, title, items) {
+    container.replaceChildren();
+    if (!items.length) return;
+    const note = document.createElement('div'); note.className = 'note ' + cls;
+    const heading = document.createElement('strong'); heading.textContent = title;
+    const list = document.createElement('ul'); list.style.margin = '4px 0 0 18px'; list.style.padding = '0';
+    for (const item of items) { const li = document.createElement('li'); li.textContent = item; list.append(li); }
+    note.append(heading, list); container.append(note);
+  }
+  async function runPreview() {
+    $('preview').disabled = true; $('generate').disabled = true; $('previewBusy').classList.remove('hidden'); showError('');
+    try {
+      const result = await api('/api/preview', {});
+      const status = $('previewStatus');
+      status.className = 'note ' + (result.ready ? 'ok' : 'err');
+      status.textContent = result.ready
+        ? `Preview passed: ${result.summary}. Plan saved to ${result.planFile} (valid until ${new Date(result.expires).toLocaleString()}). Deploy with the command below.`
+        : 'Preview found blockers. Fix them above, tick "Overwrite", create the configuration again and re-run Preview.';
+      noteList($('previewBlockers'), 'err', 'Blockers', asArray(result.blockers));
+      noteList($('previewWarnings'), 'warn', 'Warnings', asArray(result.warnings));
+      const lines = [...asArray(result.log)];
+      const changes = asArray(result.changes);
+      if (changes.length) { lines.push('', 'Previewed changes:'); for (const c of changes) lines.push(`  [${c.stage}] ${c.changeType.padEnd(10)} ${c.resource}`); }
+      $('previewChanges').textContent = lines.join('\n').trim();
+      $('previewChanges').classList.toggle('hidden', !lines.length);
+      const next = $('nextSteps'); next.replaceChildren();
+      if (result.next) next.append(commandRow(result.next));
+      $('previewResult').classList.remove('hidden');
+      $('previewResult').scrollIntoView({ behavior: 'smooth' });
+    } catch (e) {
+      showError('Preview failed: ' + e.message);
+    } finally {
+      $('preview').disabled = false; $('generate').disabled = false; $('previewBusy').classList.add('hidden');
+    }
+  }
+
+  async function init() {
+    for (let h = 1; h <= 22; h++) for (const m of ['00', '30']) {
+      const t = `${String(h).padStart(2, '0')}:${m}`;
+      if (t > '22:00') continue;
+      $('dayStart').append(new Option(t, t)); $('dayEnd').append(new Option(t, t));
+    }
+    $('dayStart').value = '08:00'; $('dayEnd').value = '18:00';
+    groupBox('users'); groupBox('admins');
+    wireChoices('networkMode', () => { const n = radioValue('networkMode') === 'New'; $('newNetwork').classList.toggle('hidden', !n); $('existingNetwork').classList.toggle('hidden', n); });
+    wireChoices('hosting', onHosting);
+    wireChoices('identity', onIdentity);
+    wireChoices('profileFailure', () => {});
+    for (const id of ['workspaceName', 'desktopName']) $(id).addEventListener('input', () => { state.displayEdited[id] = true; });
+    wireChoices('scaling', () => $('scheduleBox').classList.toggle('hidden', radioValue('scaling') !== 'BusinessHours'));
+    $('subscription').addEventListener('change', onSubscription);
+    $('region').addEventListener('change', onRegion);
+    $('vnet').addEventListener('change', onVnet);
+    $('prefix').addEventListener('input', syncDefaults);
+    $('rg').addEventListener('input', () => { state.rgEdited = true; checkResourceGroup(); });
+    $('addressSpace').addEventListener('input', () => { $('addressSpace').dataset.edited = '1'; checkOverlap(); });
+    for (const id of ['persona', 'users', 'peak']) $(id).addEventListener('input', () => { updateSizing(); if (id === 'persona') $('personaHint').textContent = (state.personas.find(p => p.id === $('persona').value) || {}).description || ''; });
+    $('generate').addEventListener('click', generate);
+    $('preview').addEventListener('click', runPreview);
+    $('finish').addEventListener('click', async () => {
+      await api('/api/shutdown', {}).catch(() => {});
+      const done = document.createElement('main'); done.textContent = 'The wizard has closed. You can close this tab and continue in PowerShell.';
+      document.body.replaceChildren(done);
+    });
+    try {
+      const context = await api('/api/context');
+      $('who').textContent = `Signed in as ${context.account}`;
+      $('outputInfo').textContent = `The configuration is written to ${context.outputFile}.`;
+      $('overwriteBox').classList.toggle('hidden', !context.outputExists);
+      state.personas = asArray(await api('/api/personas'));
+      fill($('persona'), state.personas, p => p.id, p => p.label, 'Standard');
+      $('personaHint').textContent = (state.personas.find(p => p.id === 'Standard') || {}).description || '';
+      const subscriptions = asArray(await api('/api/subscriptions'));
+      fill($('subscription'), subscriptions, s => s.id, s => `${s.name} (${s.id})`, context.subscriptionId);
+      syncDefaults();
+      onHosting(); onIdentity();
+      await onSubscription();
+    } catch (e) { showError(e.message); }
+  }
+  init();
+})();
+</script>
+</body>
+</html>

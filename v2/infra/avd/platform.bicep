@@ -31,6 +31,9 @@ param deployPrivateDns bool = true
 param hostPool hostPoolConfiguration?
 @description('Optional AVD autoscale plan for the host pool. Omit to deploy no scaling plan.')
 param scaling scalingConfiguration?
+@description('Workspace name users see in Windows App; empty for the default "<prefix> Workspace".')
+@maxLength(64)
+param workspaceFriendlyName string = ''
 
 module platform './modules/platform.bicep' = {
   params: {
@@ -48,6 +51,7 @@ module platform './modules/platform.bicep' = {
     deployPrivateDns: deployPrivateDns
     hostPool: hostPool
     scaling: scaling
+    workspaceFriendlyName: workspaceFriendlyName
   }
 }
 

@@ -15,6 +15,7 @@ param privateEndpointSubnetName string
 param deployPrivateDns bool
 param hostPool hostPoolConfiguration?
 param scaling scalingConfiguration?
+param workspaceFriendlyName string = ''
 
 var hostPoolType = hostPool.?type ?? 'Pooled'
 var isPersonal = hostPoolType == 'Personal'
@@ -37,6 +38,7 @@ module core '../01-Deploy-CoreAVDInfra.bicep' = {
     maxSessionLimit: hostPool.?maxSessionLimit ?? 5
     loadBalancerType: hostPool.?loadBalancer ?? 'BreadthFirst'
     personalDesktopAssignmentType: hostPool.?assignmentType ?? 'Automatic'
+    workspaceFriendlyName: workspaceFriendlyName
   }
 }
 

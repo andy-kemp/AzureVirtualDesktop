@@ -18,36 +18,60 @@ Customers install this portal into **their own Azure subscription and Entra tena
 - [ADR 0010](docs/adr/0010-persona-based-sizing.md): shared/dedicated, persona and user-count questions that size the host pool, using the [sizing profiles](contracts/sizing-profiles.json) and [sizing module](lib/AvdSizing.psm1).
 - [ADR 0011](docs/adr/0011-user-profiles.md): FSLogix on Azure Files for shared pools (hybrid, or cloud-only preview) and local profiles for dedicated hosts, with the V2 [session host prep script](scripts/session-host-prep.ps1).
 - [ADR 0012](docs/adr/0012-expansion-and-dedicated-users.md): expanding V2 deployments and assigning dedicated hosts to named users ([expansion module](lib/AvdExpansion.psm1)).
+- [ADR 0013](docs/adr/0013-foundation-stage.md): subscription selection and Azure discovery in `New`, plus the foundation stage that creates the resource group, network with NAT, Key Vault with generated password, and deployment identity ([discovery module](lib/AvdDiscovery.psm1), [foundation Bicep](infra/avd/foundation.bicep)).
+- [ADR 0014](docs/adr/0014-local-web-wizard.md): `-Mode Web`, a local browser wizard with dropdowns and a group picker that writes the same configuration ([page](web/index.html)).
+- [ADR 0015](docs/adr/0015-post-deploy-configuration.md): display names users see, FSLogix sign-in protection, and `-Mode PostDeploy` for the Entra RDP setting, storage app consent/tag/private-link names, Conditional Access exclusion and FSLogix folder permissions ([post-deploy module](lib/AvdPostDeploy.psm1)).
 
 ## Phase 1 local CLI
 
 The CLI covers a sizing questionnaire, expansion of saved V2 configurations, contract validation, Bicep compilation, and Azure **Preview** and **Deploy**. Follow the [sandbox test runbook](docs/sandbox-test.md) for a first real run.
 
 ```powershell
+pwsh -NoProfile -File ./v2/avd.ps1 -Mode Web
 pwsh -NoProfile -File ./v2/avd.ps1 -Mode New -OutputFile ./my-avd.json
 pwsh -NoProfile -File ./v2/avd.ps1 -Mode Expand -ConfigurationFile ./my-avd.json -AddHosts 2
 pwsh -NoProfile -File ./v2/avd.ps1 -Mode AddUser -ConfigurationFile ./my-avd.json -UserPrincipalName jane@contoso.com
 pwsh -NoProfile -File ./v2/avd.ps1 -Mode Validate -ConfigurationFile ./v2/config/avd.example.json
 pwsh -NoProfile -File ./v2/avd.ps1 -Mode Build -ConfigurationFile ./v2/config/avd.example.json
 pwsh -NoProfile -File ./v2/avd.ps1 -Mode Preview -ConfigurationFile ./my-avd.json
-pwsh -NoProfile -File ./v2/avd.ps1 -Mode Deploy -ConfigurationFile ./my-avd.json -AsSignedInUser
+pwsh -NoProfile -File ./v2/avd.ps1 -Mode Deploy -ConfigurationFile ./my-avd.json -AsSignedInUser -PostDeploy
+pwsh -NoProfile -File ./v2/avd.ps1 -Mode PostDeploy -ConfigurationFile ./my-avd.json
 pwsh -NoProfile -File ./v2/tests/Phase1.Tests.ps1
 pwsh -NoProfile -File ./v2/tests/Deployment.Tests.ps1
+pwsh -NoProfile -File ./v2/tests/Web.Tests.ps1
 ```
+
+`-Mode Web` opens a local browser wizard ([ADR 0014](docs/adr/0014-local-web-wizard.md)). It uses your Azure sign-in and offers:
+
+- subscription, region, time zone and working-hours dropdowns;
+- new or existing VNet;
+- a searchable group picker, or create-new;
+- a live sizing recommendation, with a check that the VM size is available to your subscription in the region (and same-vCPU alternatives if it isn't);
+- **Run Preview** in the page once the configuration is created.
+
+It writes the same configuration as `-Mode New` (default `v2/sandbox/avd.json`). After Preview passes it shows the Deploy command, which you run in PowerShell. Use `-Port` or `-OutputFile` to change the defaults. In the terminal, `-Mode New -VmSize <size>` overrides the recommended size the same way.
 
 The sample uses reserved/example values and is not deployable. The schema is the machine contract, not the intended questionnaire: the [guided pilot experience](docs/deployment-experience.md) derives ordinary values and keeps secret URIs/artifact digests out of the user flow. The target resource group and VNet/subnets must already exist for the current build-only slice. `Build` compiles the two V2 AVD entry points without Azure login or resource changes.
 
 ### Sizing questionnaire
 
-`-Mode New` asks:
+`-Mode New` signs in to Azure and asks for the subscription, AVD region, prefix, resource group, new or existing VNet, and the users and admins groups by name. It then asks:
 
 1. Is this a shared platform or dedicated session hosts?
 2. Which persona: Frontline (web/LOB apps), Standard (Microsoft 365 and Teams) or Heavy?
 3. How many users, and for shared pools, what peak concurrency?
 4. For shared pools, are users hybrid (synced from AD) or cloud-only (preview)? This chooses the FSLogix profile.
 5. Business-hours scaling or always available?
+6. The workspace and desktop names users see, and for shared pools whether a failed profile load gives a temporary profile or blocks sign-in.
 
-It applies the answers to a base configuration (`-ConfigurationFile`, by default the example) and writes `-OutputFile` as contract `1.3.0`, with `profile`, `workload`, `hostPool`, `sessionHosts` and `scaling` filled in. Each answer can be passed as a parameter (`-Hosting`, `-Persona`, `-Users`, `-PeakConcurrencyPct`, `-UserIdentity`, `-ScalingPreset`, `-TimeZone`, `-WorkdayStart`, `-WorkdayEnd`) for unattended use; existing files need `-Force`.
+It writes `-OutputFile` as contract `1.5.0`:
+
+- **Discovered or generated values:** tenant, subscription and target; network; AVD service principal; unique Key Vault and storage names; the deployment identity; and the pinned prep script ([artifacts.json](contracts/artifacts.json)).
+- **A `foundation` section** that Deploy creates first ([ADR 0013](docs/adr/0013-foundation-stage.md)).
+- **Sizing and scaling:** `profile`, `workload`, `hostPool`, `sessionHosts` and `scaling`.
+- **What users see and FSLogix behaviour:** `display` and `fslogix` ([ADR 0015](docs/adr/0015-post-deploy-configuration.md)).
+
+Every answer can be passed as a parameter for unattended use, for example `-SubscriptionId`, `-Location`, `-Prefix`, `-ResourceGroupName`, `-NetworkMode`, `-AddressSpace`, `-UsersGroup`, `-AdminsGroup`, `-Hosting`, `-Persona`, `-Users`, `-PeakConcurrencyPct`, `-UserIdentity`, `-ScalingPreset`, `-VmSize`, `-WorkspaceName`, `-DesktopName` and `-ProfileFailureAction`. Existing files need `-Force`. `-Offline` skips discovery and applies the sizing answers to a base configuration (`-ConfigurationFile`, by default the example).
 
 - **Shared:** a pooled multi-session pool sized at Microsoft's users-per-vCPU guidance on D8s_v5 hosts, plus one spare. FSLogix profiles on Azure Files with Microsoft Entra Kerberos.
 - **Dedicated:** a personal pool with one persona-sized single-session VM per user, Direct assignment, and the profile kept on the VM like Windows 365. No storage account is deployed.
@@ -84,7 +108,7 @@ Contract `1.1.0` adds an optional `scaling` section. When present, the platform 
 
 The AVD service starts and deallocates existing hosts within `sessionHosts.count`. Nothing is created or deleted. `Validate` checks the time zone ID, phase ordering and day overlap. Omit `scaling` to keep the earlier behaviour; `1.0.0` files remain valid.
 
-Before scaling can work, a customer Azure access administrator must assign **Desktop Virtualization Power On Off Contributor** to the Azure Virtual Desktop service principal **at subscription scope**. The workload Bicep deliberately does not grant this. See [ADR 0009](docs/adr/0009-native-avd-autoscale.md).
+Before scaling can work, **Desktop Virtualization Power On Off Contributor** must be assigned to the Azure Virtual Desktop service principal **at subscription scope**. Deploy's foundation stage grants it when it is missing; otherwise Preview blocks until an Azure access administrator assigns it. See [ADR 0009](docs/adr/0009-native-avd-autoscale.md).
 
 ### Preview and Deploy
 
@@ -93,17 +117,27 @@ Both run in the [orchestration module](lib/AvdDeployment.psm1).
 **`-Mode Preview`** is read-only:
 
 - Signs in to the configured tenant and subscription if needed.
-- Checks the target resource group, VNet and subnets, the prep script SHA-256 and the autoscale power role.
-- Runs Azure what-if. The session-host stage is previewed only once the host pool exists.
+- Checks resource providers, the resource group, the VNet and subnets (unless the foundation creates them), Key Vault and storage name availability, the prep script SHA-256 and the autoscale power role.
+- Runs Azure what-if: foundation at subscription scope; platform and session hosts once their resource group, network and host pool exist.
 - Writes a plan (`<config>.plan.json`) bound to the configuration and template hashes, valid for 24 hours, with any blockers and warnings.
 
 **`-Mode Deploy`** applies a fresh, blocker-free, unchanged plan:
 
 - Approval is by typing the resource group name, or `-Approve <rg>`.
 - It runs as the deployment managed identity, or as you with `-AsSignedInUser` for sandbox and local runs.
-- It reads the admin password from Key Vault, deploys the platform, creates a 4-hour registration token, deploys hosts, **always revokes the token**, and verifies registration.
+- It registers missing providers, then runs the **foundation**: resource group, VNet with NAT gateway, Key Vault with a generated admin password that is never shown or rotated, and the managed identity.
+- It then deploys the platform and sets the desktop name users see, creates a 4-hour registration token, deploys hosts, **always revokes the token**, verifies registration, and restarts new FSLogix hosts once so the Kerberos setting applies.
 - For dedicated pools it assigns hosts to named users and adds them to the AVD users group with your delegated Graph permission. Denial becomes a manual task, never a fallback.
+- With `-PostDeploy` it then runs the post-deployment configuration below.
 - It ends with the remaining manual tasks.
+
+**`-Mode PostDeploy`** (also `Deploy -PostDeploy`) finishes the tenant and storage setup with your delegated rights ([ADR 0015](docs/adr/0015-post-deploy-configuration.md)):
+
+- enables Microsoft Entra authentication for RDP (Windows Cloud Login), which the hosts' single sign-on needs;
+- grants admin consent to the storage account's Entra app, adds the cloud-group tag (cloud-only) and its `privatelink` identifier URIs;
+- excludes only that app from MFA Conditional Access policies that target all resources, after you confirm (`-ConditionalAccess Ask|Exclude|Report`); Microsoft-managed and device or privileged-role policies are listed for review;
+- sets FSLogix's recommended folder permissions, briefly allowing only your public IP (`-OperatorPublicIp` or detected) through the storage firewall with a temporary data role, both always reverted;
+- reports each host's Entra join, Intune management and Windows build.
 
 Offline mocked tests cover ordering, failure handling and secret hygiene. The first real run should follow the [sandbox runbook](docs/sandbox-test.md). Do not use the root runner as a substitute.
 
@@ -123,6 +157,7 @@ Offline mocked tests cover ordering, failure handling and secret hygiene. The fi
 | Sizing | Shared (pooled) or dedicated (personal) pools sized from persona and user count using Microsoft guidance; operator may override | [ADR 0010](docs/adr/0010-persona-based-sizing.md) |
 | Profiles | FSLogix on Azure Files for shared pools (hybrid GA, cloud-only preview); local profiles on dedicated hosts | [ADR 0011](docs/adr/0011-user-profiles.md) |
 | Expansion | Expand V2 estates from the saved config; dedicated hosts for named users; group membership via operator's delegated rights only | [ADR 0012](docs/adr/0012-expansion-and-dedicated-users.md) |
+| Foundation | `New` discovers subscription/region/network/groups; Deploy creates the resource group, VNet with NAT, Key Vault with generated password and managed identity | [ADR 0013](docs/adr/0013-foundation-stage.md) |
 
 ## Architecture
 
